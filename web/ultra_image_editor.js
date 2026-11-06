@@ -1030,7 +1030,9 @@ function selectedExecutionScope(graph, options) {
 let queueHookInstalled = false;
 function installQueueSaveHook() {
   if (queueHookInstalled || typeof app?.queuePrompt !== "function") return;
-  const original = app.queuePrompt.bind(app);
+  // Keep app as the receiver of the original queuePrompt call.
+  const queuePromptFn = app.queuePrompt;
+  const original = (...a) => queuePromptFn.apply(app, a);
   app.queuePrompt = async function ultraEditorQueuePrompt(...args) {
     let pending = [];
     try {

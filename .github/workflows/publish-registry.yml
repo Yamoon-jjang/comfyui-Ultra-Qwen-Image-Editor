@@ -34,7 +34,7 @@ jobs:
           echo "::error::Comfy Registry token is not configured. Add REGISTRY_ACCESS_TOKEN in this repository's Settings > Secrets and variables > Actions and rerun manually."
           exit 1
 
-      - name: Publish node v1.0.0 to Comfy Registry
+      - name: Publish node to Comfy Registry
         if: ${{ env.REGISTRY_ACCESS_TOKEN != '' }}
         uses: Comfy-Org/publish-node-action@v1
         with:
