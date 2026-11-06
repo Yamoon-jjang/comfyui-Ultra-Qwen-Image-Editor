@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — v1.0.2
+# Ultra Qwen Image Editor + PiD — v1.0.3
 
 **Qwen 전용 ComfyUI 이미지 편집 커스텀 노드 / Native ComfyUI image-editing node for Qwen**
 
