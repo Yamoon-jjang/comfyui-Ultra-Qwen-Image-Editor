@@ -1,0 +1,41 @@
+name: Publish Ultra Qwen Image Editor to Comfy Registry
+
+# First release: run manually from Actions after setting REGISTRY_ACCESS_TOKEN.
+# Future releases: increment [project].version in pyproject.toml and push to main.
+# This workflow does NOT modify or rebuild the GitHub Release ZIP.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  publish-node:
+    name: Publish to Comfy Registry
+    if: ${{ github.repository == 'Yamoon-jjang/comfyui-Ultra-Qwen-Image-Editor' }}
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY_ACCESS_TOKEN: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Preserve Korean filenames
+        run: git config --global core.quotePath false
+
+      - name: Validate Registry token
+        if: ${{ env.REGISTRY_ACCESS_TOKEN == '' }}
+        run: |
+          echo "::error::Comfy Registry token is not configured. Add REGISTRY_ACCESS_TOKEN in this repository's Settings > Secrets and variables > Actions and rerun manually."
+          exit 1
+
+      - name: Publish node v1.0.0 to Comfy Registry
+        if: ${{ env.REGISTRY_ACCESS_TOKEN != '' }}
+        uses: Comfy-Org/publish-node-action@v1
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
