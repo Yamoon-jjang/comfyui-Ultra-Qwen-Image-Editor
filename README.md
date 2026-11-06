@@ -1,10 +1,25 @@
-# Ultra Qwen Image Editor + PiD — v1.0
+# Ultra Qwen Image Editor + PiD — v1.0.0
 
 **Qwen 전용 ComfyUI 이미지 편집 커스텀 노드 / Native ComfyUI image-editing node for Qwen**
 
 이미지를 입력하고 자연어로 편집합니다. **Qwen Image Edit 2511**과 **Qwen Image 2.1(Base/Turbo)**을 지원하며, 여러 장의 참조 이미지를 활용하고 수정할 이미지를 지정할 수 있습니다. LoRA를 적용할 수 있고, **PiD 업스케일은 Qwen 2511에 한해 선택적으로 제공**합니다.
 
-Edit images with natural-language instructions using **Qwen Image Edit 2511** or **Qwen Image 2.1 (Base/Turbo)**, multiple numbered reference images, target selection and LoRA. Optional PiD upscaling is available for **Qwen 2511 only**.
+**English overview:** Ultra Qwen Image Editor + PiD is a native ComfyUI custom node for reference-guided image editing with **Qwen Image Edit 2511** and **Qwen Image 2.1 (Base/Turbo)**. Connect one or more reference images, choose which input should be edited, then describe the changes in Korean or English. The node provides positive/negative prompts, aspect-aware resolution controls, editable sampling steps and CFG, a reorderable multi-LoRA stack, per-model settings recall, and optional asset reuse to reduce repeated loading.
+
+It accepts up to **3 image inputs for Qwen 2511** or **10 for Qwen 2.1**, with dynamically added numbered sockets. English/Korean `imageN` references are remapped to match a changed edit target. For Qwen 2.1 Turbo, **8 steps use the built-in sigma schedule** while other step counts follow the selected KSampler scheduler. Optional **PiD x2/x4 upscaling and color matching are supported only for Qwen 2511**; Qwen 2.1 has no native PiD support in this node. Output images can be connected to ComfyUI's built-in `Save Image` node.
+
+
+## 노드 화면 / Node screenshot
+
+![Ultra Qwen Image Editor + PiD node screenshot (Korean interface)](assets/ultra-qwen-image-editor-node.webp)
+
+*화면 예시 / Example interface. The displayed widget labels change with the ComfyUI language setting; model filenames and internal workflow identifiers remain unchanged.*
+
+## 한글·영문 자동 전환 / Automatic Korean & English UI
+
+**한국어:** ComfyUI의 언어 설정을 한국어 또는 영어로 변경하면, 노드의 **설정 이름·툴팁·LoRA 메뉴·안내 알림**이 자동으로 바뀝니다. 노드를 다시 설치하거나 언어팩을 수동으로 선택할 필요가 없습니다. 프롬프트는 한국어와 영어 모두 입력할 수 있습니다.
+
+**English:** The node automatically follows ComfyUI's **Korean/English language setting**. Widget labels, contextual tooltips, LoRA controls, and user notifications switch to the selected language without a separate language pack or reinstall. Editing prompts may be written in either Korean or English. Technical identifiers such as model filenames, `imageN` sockets, sampler options, and stored workflow values intentionally remain unchanged to protect compatibility.
 
 ## Features / 주요 기능
 
@@ -23,15 +38,30 @@ Edit images with natural-language instructions using **Qwen Image Edit 2511** or
 
 ## 설치 / Installation
 
-1. ComfyUI를 종료합니다. / Close ComfyUI.
-2. 이 ZIP을 풀어서 **`ComfyUI/custom_nodes/comfyui-Ultra-Qwen-Image-Editor/`** 폴더가 되도록 넣습니다. / Extract the folder there.
-3. 이전 이름으로 설치한 **동일 커스텀 노드가 있다면 중복되지 않도록** 기존 폴더를 제거하거나 다른 곳에 백업합니다. / Do not keep duplicate copies of the same node installed.
-4. 사용하는 모델 파일, 텍스트 인코더, VAE를 해당 ComfyUI 모델 폴더에 설치한 후 ComfyUI를 재시작합니다. / Install the matching model assets and restart ComfyUI.
-5. 노드 검색에서 **`Ultra Qwen Image Editor + PiD`**를 추가합니다. 이미지 출력은 `Save Image` 등에 연결하세요. / Find the node and connect its image output to a Save Image node.
+**방법 1 — Git 설치 (권장) / Method 1 — Git clone (recommended)**
 
-최신 ComfyUI 코어에서 Qwen 편집 인코더 노드가 필요합니다. 이 패키지는 별도 `pip` 의존성을 추가 설치하지 않습니다. PiD 사용 시에는 호환되는 QwenImage PiD 체크포인트와 Gemma 2 ELM 텍스트 인코더, 해당 ComfyUI 코어 기능이 필요합니다.
+ComfyUI를 완전히 종료한 뒤, 터미널/PowerShell에서 `ComfyUI/custom_nodes` 폴더로 이동해 다음 명령을 실행합니다. / Close ComfyUI and open a terminal in the `ComfyUI/custom_nodes` directory:
 
-Recent ComfyUI with the native Qwen image encoders is required. No additional pip package is installed by this node. Optional PiD requires the matching QwenImage PiD checkpoint, Gemma 2 ELM encoder and relevant core nodes.
+```bash
+git clone https://github.com/Yamoon-jjang/comfyui-Ultra-Qwen-Image-Editor.git
+```
+
+업데이트 / To update an existing Git installation:
+
+```bash
+cd comfyui-Ultra-Qwen-Image-Editor
+git pull
+```
+
+**방법 2 — ZIP 설치 / Method 2 — ZIP download**
+
+GitHub Releases의 ZIP을 다운로드해 압축을 풀고 `ComfyUI/custom_nodes/comfyui-Ultra-Qwen-Image-Editor/` 구조로 배치합니다. / Download the release ZIP and extract the included folder directly under `ComfyUI/custom_nodes/`.
+
+**중복 설치 금지 / Avoid duplicate installations:** 예전 폴더 `comfyui-Ultra-Image-Editor` 또는 새 폴더의 다른 복사본이 있으면 ComfyUI를 종료한 상태에서 `custom_nodes` 밖으로 옮기세요. / Move any previous `comfyui-Ultra-Image-Editor` directory or duplicate copies out of `custom_nodes` before starting ComfyUI.
+
+**최초 실행 / First run:** Install compatible Qwen diffusion model, text encoder, and VAE files in their regular ComfyUI model directories. Restart ComfyUI and search for `Ultra Qwen Image Editor + PiD`. Connect `image1` and send `Edited Image` to a `Save Image` node. No extra pip requirements are declared by this custom node.
+
+최근 버전의 ComfyUI 코어와 호환 모델 파일이 필요합니다. 선택적 PiD에는 지원되는 QwenImage PiD 체크포인트와 Gemma 2 ELM 인코더가 별도로 필요합니다. / A recent ComfyUI build with the Qwen edit core nodes is required; optional PiD also needs its compatible checkpoint and Gemma 2 ELM encoder.
 
 ## 빠른 사용 / Quick start
 

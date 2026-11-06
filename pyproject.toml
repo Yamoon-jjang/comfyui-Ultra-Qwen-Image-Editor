@@ -1,10 +1,13 @@
 [project]
 name = "comfyui-ultra-qwen-image-editor"
-version = "1.0"
+version = "1.0.0"
 description = "Qwen Image Edit 2511 and Qwen Image 2.1 multi-reference image editor for ComfyUI with LoRA and optional Qwen PiD upscaling"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-or-later"}
+
+[project.urls]
+Repository = "https://github.com/Yamoon-jjang/comfyui-Ultra-Qwen-Image-Editor"
 
 [tool.comfy]
 PublisherId = "yamoon-jjang"

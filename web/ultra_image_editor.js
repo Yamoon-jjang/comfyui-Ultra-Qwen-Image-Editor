@@ -134,8 +134,8 @@ function pruneRetiredFamilySettings(node) {
         delete perModel[key];
         continue;
       }
-      // A v0.4.7 profile may contain positive_text, negative_text, seed,
-      // resolution_mode and edit_target. Never restore or re-serialize them.
+      // Older saved profiles may contain prompt, seed, resolution and
+      // edit-target fields. Never restore or re-serialize them.
       for (const field of Object.keys(saved)) {
         if (!PROFILE_ALLOWED.has(field)) delete saved[field];
       }
@@ -883,8 +883,8 @@ function safeWidgetDefault(w) {
 function isCurrentWidgetLayout(standardWidgets, saved, properties) {
   const schema = properties?.[WIDGET_SCHEMA_PROPERTY];
   if (schema !== undefined && schema !== WIDGET_SCHEMA_VERSION) return false;
-  // Files from v0.4.4–v0.4.8 predate the marker but have this same order.
-  // Reject older positional schemas, not all unmarked workflows.
+  // Some unmarked workflows share this widget order.
+  // Reject unsupported positional layouts, not all unmarked workflows.
   if (!saved?.length) return true;
   const byName = Object.create(null);
   for (let i = 0; i < Math.min(standardWidgets.length, saved.length); i++) {

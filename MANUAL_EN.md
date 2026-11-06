@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — User Manual v1.0
+# Ultra Qwen Image Editor + PiD — User Manual v1.0.0
 
 ## Purpose and supported models
 
@@ -18,6 +18,19 @@ A Qwen text-to-image checkpoint (for example a clearly named Qwen Image 2512 gen
 5. Restart ComfyUI, search for **Ultra Qwen Image Editor + PiD**, and connect its `Edited Image` output to `Save Image`.
 
 A recent ComfyUI core is required, including the native Qwen editing encoders, samplers and loaders. The node adds **no separate pip dependencies**. Optional PiD requires additional compatible core nodes, a QwenImage PiD checkpoint and a Gemma 2 ELM text encoder.
+
+### Install with Git
+
+From the ComfyUI `custom_nodes` directory:
+
+```bash
+git clone https://github.com/Yamoon-jjang/comfyui-Ultra-Qwen-Image-Editor.git
+```
+
+For future updates, enter `comfyui-Ultra-Qwen-Image-Editor` and run `git pull`, then restart ComfyUI. Do not keep the old `comfyui-Ultra-Image-Editor` folder installed at the same time; duplicate extensions can conflict.
+
+The node UI automatically follows the selected Korean/English ComfyUI locale. Widget labels, tooltips, LoRA menus and notices are localized; model filenames, socket identifiers and stored workflow option values are intentionally not translated.
+
 
 ## Asset selection
 
