@@ -27,13 +27,20 @@ jobs:
               "README.md", "__init__.py", "pyproject.toml",
               "requirements.txt", "ultra_image_editor.py", "메뉴얼.txt",
               "web/ultra_image_editor.js",
-              "assets/ultra-qwen-image-editor-node.webp",
+              "assets/ultra-qwen-image-editor-workflow.webp",
           ]
           with ZipFile("comfyui-Ultra-Qwen-Image-Editor_v1.0.0.zip", "w", ZIP_DEFLATED) as archive:
               for name in files:
                   if not Path(name).is_file():
                       raise FileNotFoundError(name)
                   archive.write(name, prefix + name)
+          # Verify the release ZIP contains the same current working screenshot
+          # as the GitHub README, and never ships the retired error-state image.
+          with ZipFile("comfyui-Ultra-Qwen-Image-Editor_v1.0.0.zip", "r") as archive:
+              screenshot = Path("assets/ultra-qwen-image-editor-workflow.webp")
+              assert archive.read(prefix + str(screenshot)) == screenshot.read_bytes()
+              assert prefix + "assets/ultra-qwen-image-editor-node.webp" not in archive.namelist()
+              assert archive.testzip() is None
           PY
       - name: Publish GitHub Release
         env:
