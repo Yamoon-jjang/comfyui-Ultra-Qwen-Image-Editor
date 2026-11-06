@@ -1,0 +1,9 @@
+# Keep tests in the public source repository, but exclude them from the Registry package.
+tests/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+dist/
+build/
+*.zip
