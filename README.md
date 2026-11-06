@@ -9,11 +9,11 @@
 It accepts up to **3 image inputs for Qwen 2511** or **10 for Qwen 2.1**, with dynamically added numbered sockets. English/Korean `imageN` references are remapped to match a changed edit target. For Qwen 2.1 Turbo, **8 steps use the built-in sigma schedule** while other step counts follow the selected KSampler scheduler. Optional **PiD x2/x4 upscaling and color matching are supported only for Qwen 2511**; Qwen 2.1 has no native PiD support in this node. Output images can be connected to ComfyUI's built-in `Save Image` node.
 
 
-## 노드 화면 / Node screenshot
+## 실제 편집 예시 / Image editing workflow
 
-![Ultra Qwen Image Editor + PiD node screenshot (Korean interface)](assets/ultra-qwen-image-editor-node.webp)
+![Ultra Qwen Image Editor + PiD running successfully with two source images and edited image and PiD outputs](assets/ultra-qwen-image-editor-workflow.webp)
 
-*화면 예시 / Example interface. The displayed widget labels change with the ComfyUI language setting; model filenames and internal workflow identifiers remain unchanged.*
+*정상 실행 예시: Qwen Image Edit 2511의 두 참조 이미지, 편집 결과, 선택적 PiD 업스케일 결과를 함께 보여줍니다. / A working Qwen Image Edit 2511 workflow showing two reference images, the edited output, and optional PiD upscaling. Widget labels automatically follow the ComfyUI Korean/English language setting.*
 
 ## 한글·영문 자동 전환 / Automatic Korean & English UI
 
