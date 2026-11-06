@@ -1,0 +1,4 @@
+# No additional pip packages are installed by this node.
+# Requires recent ComfyUI core with TextEncodeQwenImageEditPlus,
+# TextEncodeQwenImage21, and optional PiD core.
+# Optional PiD color match uses the kornia bundled with ComfyUI.
