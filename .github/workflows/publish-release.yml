@@ -1,0 +1,62 @@
+name: Publish GitHub release (version from pyproject)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/release-trigger"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.repository == 'Yamoon-jjang/comfyui-Ultra-Qwen-Image-Editor'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble release ZIP
+        run: |
+          python - <<'PY'
+          from zipfile import ZipFile, ZIP_DEFLATED
+          from pathlib import Path
+          prefix = "comfyui-Ultra-Qwen-Image-Editor/"
+          files = [
+              ".comfyignore", ".gitignore", "LICENSE", "MANUAL_EN.md",
+              "README.md", "__init__.py", "pyproject.toml",
+              "requirements.txt", "ultra_image_editor.py", "메뉴얼.txt",
+              "web/ultra_image_editor.js",
+              "assets/ultra-qwen-image-editor-workflow.webp",
+          ]
+          import tomllib
+          ver = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          zip_name = f"comfyui-Ultra-Qwen-Image-Editor_v{ver}.zip"
+          Path("release_version.txt").write_text(ver, encoding="utf-8")
+          with ZipFile(zip_name, "w", ZIP_DEFLATED) as archive:
+              for name in files:
+                  if not Path(name).is_file():
+                      raise FileNotFoundError(name)
+                  archive.write(name, prefix + name)
+          # Verify the release ZIP contains the same current working screenshot
+          # as the GitHub README, and never ships the retired error-state image.
+          with ZipFile(zip_name, "r") as archive:
+              screenshot = Path("assets/ultra-qwen-image-editor-workflow.webp")
+              assert archive.read(prefix + str(screenshot)) == screenshot.read_bytes()
+              assert prefix + "assets/ultra-qwen-image-editor-node.webp" not in archive.namelist()
+              assert archive.testzip() is None
+          PY
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ver="$(cat release_version.txt)"
+          tag="v${ver}"
+          zip_file="comfyui-Ultra-Qwen-Image-Editor_v${ver}.zip"
+          if gh release view ${tag} >/dev/null 2>&1; then
+            gh release upload ${tag} "$zip_file" --clobber
+            gh release edit ${tag} --title "Ultra Qwen Image Editor + PiD ${tag}" --notes-file RELEASE_NOTES.md --latest
+          else
+            gh release create ${tag} "$zip_file" --target "$GITHUB_SHA" --title "Ultra Qwen Image Editor + PiD ${tag}" --notes-file RELEASE_NOTES.md --latest
+          fi
