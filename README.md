@@ -15,6 +15,16 @@ It accepts up to **3 image inputs for Qwen 2511** or **10 for Qwen 2.1**, with d
 
 *정상 실행 예시: Qwen Image Edit 2511의 두 참조 이미지, 편집 결과, 선택적 PiD 업스케일 결과를 함께 보여줍니다. / A working Qwen Image Edit 2511 workflow showing two reference images, the edited output, and optional PiD upscaling. Widget labels automatically follow the ComfyUI Korean/English language setting.*
 
+## 함께 사용하기 / Recommended companion: Prompt Selector v4.0.0
+
+**한국어:** [야문짱의 Ultra Qwen Image Edit Prompt Selector v4.0.0](https://github.com/Yamoon-jjang/Ultra-Qwen-Image-Edit-Prompt-Selector/releases/tag/v4.0.0)와 함께 사용하면 **프롬프트 작성부터 Qwen 이미지 편집 실행까지 두 앱의 장점을 최대한 활용**할 수 있습니다. 선택기는 브라우저에서 실행되는 별도 HTML 앱으로, **4,927개 편집 프리셋**을 조합해 영어 프롬프트를 작성합니다. 완성된 문장을 이 ComfyUI 노드의 **Positive Prompt(긍정 프롬프트)**에 붙여 넣으면 됩니다. 별도의 프로그램 간 자동 연결이나 플러그인은 필요하지 않습니다.
+
+**English:** Pair this custom node with **[Ultra Qwen Image Edit Prompt Selector v4.0.0](https://github.com/Yamoon-jjang/Ultra-Qwen-Image-Edit-Prompt-Selector/releases/tag/v4.0.0)** for a more streamlined prompt-to-edit workflow. The standalone browser tool combines **4,927 image-editing presets** into a structured English prompt. **Copy** its output into this node's **Positive Prompt** field, then run your Qwen Image Edit 2511 or Qwen Image 2.1 workflow. The two tools complement each other; they are **not automatically connected**.
+
+**권장 사용 순서 / Suggested steps:** 선택기에서 1~3장 이미지와 프리셋 선택 → 영어 프롬프트 복사 → 본 노드에 동일한 순서로 이미지 연결 → `Edit Target = image1` 확인 → **Positive Prompt**에 붙여넣기 → 실행. / Select 1–3 images and presets in the Selector → copy the English prompt → connect corresponding images in order → confirm `Edit Target = image1` → paste into **Positive Prompt** → run.
+
+> **참고 / Note:** 선택기는 **최대 3장**의 `image1`–`image3` 역할을 작성합니다. 이 노드 자체는 Qwen 2511에서 최대 **3장**, Qwen 2.1에서 최대 **10장**의 입력을 지원합니다. `Edit Target` 변경 시 이미지 번호 참조가 재매핑될 수 있으므로 출력 문장의 이미지 역할을 확인하세요. / The Selector describes up to **3 images**; this node can accept **3 (2511) or 10 (2.1)**. Check image references if you change the edit target. Pairing is a convenience workflow, not a measured performance or image-quality guarantee.
+
 ## 한글·영문 자동 전환 / Automatic Korean & English UI
 
 **한국어:** ComfyUI의 언어 설정을 한국어 또는 영어로 변경하면, 노드의 **설정 이름·툴팁·LoRA 메뉴·안내 알림**이 자동으로 바뀝니다. 노드를 다시 설치하거나 언어팩을 수동으로 선택할 필요가 없습니다. 프롬프트는 한국어와 영어 모두 입력할 수 있습니다.
