@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — User Manual v1.0.3
+# Ultra Qwen Image Editor + PiD — User Manual v1.0.4
 
 ## Purpose and supported models
 
@@ -97,6 +97,8 @@ The internal x4 processing dimension cannot exceed 8192px on its longest side. P
 `Reuse Models (RAM)` retains unchanged loaded model/encoder/VAE assets within a conservative system RAM budget; it does not enlarge GPU VRAM. Disable it for a run to clear the node's retained references. PiD may need extra RAM and model files.
 
 Model-specific profiles include model file selections, sampling settings, Zero Conditioning, PiD settings and LoRAs. They are **committed after successful queue submission**, not after finished image rendering. Edits made before queuing are kept as temporary drafts during model switching in the current editor session. Positive/Negative prompts, PiD scene prompt, edit target, resolution and seed remain the current task's values when models change. Save your ComfyUI workflow separately for persistent storage.
+
+Since v1.0.4 the node records the final positive/negative prompt it actually encoded (after image-reference renumbering) in the saved image metadata under `ultra_generation_prompts`. A prompt that arrives through a link — for example from a translator or LLM node — is therefore kept as the real text, not only as a link. Ultra Exif Reader v4.12+ shows it as the Final CLIP prompt. When ComfyUI reuses a cached result, the previous record is inserted again; a failed record never stops generation.
 
 Old workflows with incompatible positional widget layouts may be reset to safe defaults rather than incorrectly shifting text, dimensions or LoRA values. If warned, rebuild the node and save a new workflow. Nested subgraphs support profile saving and label localization, but a selection restricted to an output inside a subgraph may not include editor nodes upstream of the external boundary.
 

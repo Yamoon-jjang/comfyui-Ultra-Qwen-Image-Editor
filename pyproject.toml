@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-ultra-qwen-image-editor"
-version = "1.0.3"
+version = "1.0.4"
 description = "Qwen Image Edit 2511 and Qwen Image 2.1 multi-reference image editor for ComfyUI with LoRA and optional Qwen PiD upscaling"
 readme = "README.md"
 requires-python = ">=3.10"

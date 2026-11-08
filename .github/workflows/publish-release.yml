@@ -25,7 +25,7 @@ jobs:
           files = [
               ".comfyignore", ".gitignore", "LICENSE", "MANUAL_EN.md",
               "README.md", "__init__.py", "pyproject.toml",
-              "requirements.txt", "ultra_image_editor.py", "메뉴얼.txt",
+              "requirements.txt", "ultra_image_editor.py", "ultra_prompt_record.py", "메뉴얼.txt",
               "web/ultra_image_editor.js", "web/ultra_cnr_id.js",
               "assets/ultra-qwen-image-editor-workflow.webp",
           ]

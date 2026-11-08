@@ -16,6 +16,8 @@ import comfy.samplers
 import folder_paths
 import nodes
 
+from .ultra_prompt_record import record_prompt, register as register_prompt_record
+
 FAMILIES = ("Qwen Image Edit 2511", "Qwen Image 2.1")
 CAPS = {
     "Qwen Image Edit 2511": 3,
@@ -692,6 +694,8 @@ class UltraImageEditorPiD:
         for i in range(1, 11):
             specs["optional"][f"image{i}"] = ("IMAGE",)
         specs["optional"] = _FlexibleOptionalInputs(specs["optional"])
+        # Used only to record the encoded prompt in saved image metadata.
+        specs["hidden"] = {"extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}
         return specs
 
     def edit(self, model_family, diffusion_model, text_encoder, vae_name, edit_target,
@@ -699,6 +703,8 @@ class UltraImageEditorPiD:
              scheduler, zero_conditioning, pid_upscale, pid_model, pid_sampler,
              pid_scheduler, pid_steps, pid_scale, pid_color_match=True,
              resolution_mode="auto_1mp", reuse_assets=True, pid_prompt="", **inputs):
+        extra_pnginfo = inputs.pop("extra_pnginfo", None)
+        unique_id = inputs.pop("unique_id", None)
         if model_family not in CAPS:
             raise ValueError(f"지원되지 않는 모델 계열: {model_family}")
         images = {key: value for key, value in inputs.items() if re.fullmatch(r"image(?:[1-9]|10)", key)}
@@ -751,6 +757,15 @@ class UltraImageEditorPiD:
             )
         except Exception as exc:
             raise RuntimeError(f"{model_family} 편집 실행 실패: {exc}") from exc
+        pid_text = (str(pid_prompt or "").strip() or prompt) if pid_upscale else None
+        record_prompt(
+            extra_pnginfo, unique_id, "UltraImageEditorPiD",
+            positive=prompt,
+            negative=None if zero_conditioning else neg_prompt,
+            positive_input=positive_text,
+            zero_conditioning=bool(zero_conditioning),
+            pid_prompt=pid_text if pid_text is not None and pid_text != prompt else None,
+        )
         if not pid_upscale:
             return original, original
         original = original.cpu()
@@ -768,6 +783,8 @@ class UltraImageEditorPiD:
                 raise RuntimeError(f"PiD 색상 정합 실패: {exc}") from exc
         return original, scaled
 
+
+register_prompt_record("UltraImageEditorPiD")
 
 NODE_CLASS_MAPPINGS = {"UltraImageEditorPiD": UltraImageEditorPiD}
 NODE_DISPLAY_NAME_MAPPINGS = {"UltraImageEditorPiD": "Ultra Qwen Image Editor + PiD"}

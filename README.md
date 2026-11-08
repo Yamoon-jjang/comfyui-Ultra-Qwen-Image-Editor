@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — v1.0.3
+# Ultra Qwen Image Editor + PiD — v1.0.4
 
 **Qwen 전용 ComfyUI 이미지 편집 커스텀 노드 / Native ComfyUI image-editing node for Qwen**
 
@@ -101,6 +101,12 @@ Turbo의 8스텝 경로에서는 선택한 `Sampler`와 `CFG`가 반영되지만
 모델별 Steps·CFG·샘플러·TE·VAE·LoRA·PiD 등은 **생성 요청이 큐에 성공적으로 등록된 뒤** 확정 프로필로 저장됩니다. 이미지가 최종 생성된 시점과는 다릅니다. 생성 전에 편집한 값은 모델 전환 중 **현재 화면 세션에서만** 임시 보관합니다. 긍정·부정 프롬프트, PiD 장면 프롬프트, 수정 대상, 해상도와 시드는 모델 전환 시 현재 값을 유지합니다. 워크플로를 보존하려면 ComfyUI에서 별도 저장하세요.
 
 Per-model sampling, asset and LoRA settings are committed after **successful queue submission**, not after GPU completion. Unsaved drafts survive model switches only in the current editor session. Prompt texts, edit target, resolution and seed stay with the active task. Save the ComfyUI workflow separately for persistence.
+
+## 실제 프롬프트 기록 / Executed prompt record (v1.0.4)
+
+번역기·LLM 노드 등을 거쳐 들어온 프롬프트도, 노드가 실제로 모델에 넣은 최종 긍정/부정 문장을 이미지 메타데이터(`ultra_generation_prompts`)에 기록합니다. Ultra Exif Reader v4.12 이상에서 Final CLIP 프롬프트로 표시됩니다.
+
+The node records the final positive/negative prompt it actually encoded in the saved image metadata (`ultra_generation_prompts`), even when the prompt arrives through a translator or LLM link. Ultra Exif Reader v4.12+ shows it as the Final CLIP prompt.
 
 ## 언어 / Language
 

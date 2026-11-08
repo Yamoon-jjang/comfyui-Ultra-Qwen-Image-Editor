@@ -1,11 +1,12 @@
-# Ultra Qwen Image Editor + PiD v1.0.3
+# Ultra Qwen Image Editor + PiD v1.0.4
 
 **Qwen 2511·2.1/Turbo 다중 이미지 편집 커스텀 노드 / A standalone ComfyUI multi-reference image editor for Qwen.**
 
 Supports **Qwen Image Edit 2511** and **Qwen Image 2.1 Base/Turbo** with numbered references, target-image selection, built-in positive/negative prompts, configurable resolution, multi-LoRA support, and per-model settings recall.
 
-### What's new in v1.0.3 / 1.0.3 변경 사항
-- Saved workflows now record this pack's Registry ID (`cnr_id`) on its nodes, so ComfyUI names this pack instead of "Unknown pack" when the workflow is opened without the pack installed. Node behaviour is unchanged. / 워크플로를 저장할 때 이 노드 팩의 레지스트리 ID(`cnr_id`)를 노드 정보에 함께 기록합니다. 노드 팩이 없는 환경에서 워크플로를 열면 '알 수 없는 팩' 대신 이 팩 이름과 설치 버튼이 표시됩니다. 노드 기능은 이전 버전과 같습니다.
+### What's new in v1.0.4 / 1.0.4 변경 사항
+- **Executed prompt record:** the node now writes the final positive/negative prompt it actually encoded into the saved image metadata (`ultra_generation_prompts`). Prompts that arrive through a link (translator, LLM, Preview Any, ...) are kept as the real text instead of only the link. Ultra Exif Reader v4.12+ shows it as the Final CLIP prompt. / 번역기·LLM 등을 거쳐 연결선으로 들어온 프롬프트도 노드가 실제로 모델에 넣은 최종 문장을 이미지 메타데이터에 기록합니다. Ultra Exif Reader v4.12 이상에서 Final CLIP 프롬프트로 표시됩니다.
+- Cached re-runs keep the record; a failed record never stops generation. Image generation itself is unchanged. / 캐시로 실행이 생략돼도 기록이 유지되며, 기록 실패가 생성을 멈추지 않습니다. 이미지 생성 동작은 바뀌지 않았습니다.
 
 ### Key features / 주요 기능
 - **Multiple references:** Up to 3 images for Qwen 2511, up to 10 for Qwen 2.1.
@@ -23,7 +24,7 @@ cd ComfyUI/custom_nodes
 git clone https://github.com/Yamoon-jjang/comfyui-Ultra-Qwen-Image-Editor.git
 ```
 
-**ZIP:** Download `comfyui-Ultra-Qwen-Image-Editor_v1.0.3.zip` below and extract it directly into `ComfyUI/custom_nodes/`.
+**ZIP:** Download `comfyui-Ultra-Qwen-Image-Editor_v1.0.4.zip` below and extract it directly into `ComfyUI/custom_nodes/`.
 
 **Important:** Remove the older `comfyui-Ultra-Image-Editor` folder first to avoid duplicate extension registration. Restart ComfyUI after installation. Install compatible Qwen model assets separately.
 
