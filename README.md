@@ -2,6 +2,8 @@
 
 **Qwen 전용 ComfyUI 이미지 편집 커스텀 노드 / Native ComfyUI image-editing node for Qwen**
 
+[![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
+
 이미지를 입력하고 자연어로 편집합니다. **Qwen Image Edit 2511**과 **Qwen Image 2.1(Base/Turbo)**을 지원하며, 여러 장의 참조 이미지를 활용하고 수정할 이미지를 지정할 수 있습니다. LoRA를 적용할 수 있고, **PiD 업스케일은 Qwen 2511에 한해 선택적으로 제공**합니다.
 
 **English overview:** Ultra Qwen Image Editor + PiD is a native ComfyUI custom node for reference-guided image editing with **Qwen Image Edit 2511** and **Qwen Image 2.1 (Base/Turbo)**. Connect one or more reference images, choose which input should be edited, then describe the changes in Korean or English. The node provides positive/negative prompts, aspect-aware resolution controls, editable sampling steps and CFG, a reorderable multi-LoRA stack, per-model settings recall, and optional asset reuse to reduce repeated loading.
@@ -129,4 +131,22 @@ Widget labels, tooltips, LoRA menus and in-node notifications follow the ComfyUI
 - [한글 사용 설명서](메뉴얼.txt)
 - [English manual](MANUAL_EN.md)
 
-License: **GPL-3.0-or-later** — see `LICENSE`.
+## 📄 라이선스 / License
+
+**한국어**
+
+[GNU GPL v3.0 이상(GPL-3.0-or-later)](LICENSE) — 누구나 무료로 사용 · 수정 · 재배포할 수 있습니다. 단, 수정하거나 재배포할 때는 같은 GPL 라이선스로 소스 코드를 함께 공개하고 저작권 표시를 유지해야 합니다.
+ComfyUI 커스텀 노드로서 ComfyUI(GPL-3.0)와 함께 동작합니다. Qwen 확산 모델 · 텍스트 인코더 · VAE · LoRA · PiD 가중치는 이 저장소와 배포 ZIP에 포함되어 있지 않으며, 각 모델의 라이선스를 따릅니다.
+
+- 편집한 이미지와 사용한 원본 이미지의 권리와 사용 · 공유 책임은 사용자에게 있습니다.
+- 이 프로그램은 있는 그대로 제공되며, 사용으로 생긴 문제에 대해 제작자는 책임지지 않습니다.
+
+**English**
+
+Released under the [GNU GPL v3.0 or later (GPL-3.0-or-later)](LICENSE) — free to use, modify and redistribute; modified or redistributed versions must remain under the GPL, with source code available and the copyright notice kept.
+As a ComfyUI custom node, it runs together with ComfyUI (GPL-3.0). Qwen diffusion models, text encoders, VAE, LoRA and PiD weights are not included in this repository or the release ZIP, and remain under their own model licenses.
+
+- You are responsible for the rights to, and the use and sharing of, the images you edit and the source images you use.
+- Provided "as is", without warranty of any kind; the author is not liable for any problems arising from its use.
+
+Copyright (C) 2026 야문 짱 (Yamoon-jjang)
