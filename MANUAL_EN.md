@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — User Manual v1.0.5
+# Ultra Qwen Image Editor + PiD — User Manual v1.0.6
 
 ## Purpose and supported models
 

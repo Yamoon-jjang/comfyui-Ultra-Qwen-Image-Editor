@@ -6,7 +6,6 @@ optional PiD upscale, and auto/custom dimensions.
 """
 from __future__ import annotations
 
-import importlib
 import math
 import os
 import re
@@ -205,9 +204,30 @@ def _core(name, **kwargs):
     return _out(fn(**kwargs))
 
 
+def _comfy_extras_module(module):
+    """Import a known ComfyUI core ``comfy_extras`` module with plain imports.
+
+    Imports stay lazy (inside the call) so older ComfyUI builds that lack a
+    module only fail when that model family is actually used.
+    """
+    if module == "nodes_qwen":
+        from comfy_extras import nodes_qwen as mod
+    elif module == "nodes_pid":
+        from comfy_extras import nodes_pid as mod
+    elif module == "nodes_minimax_h3":
+        from comfy_extras import nodes_minimax_h3 as mod
+    elif module == "nodes_context_windows":
+        from comfy_extras import nodes_context_windows as mod
+    elif module == "nodes_post_processing":
+        from comfy_extras import nodes_post_processing as mod
+    else:
+        raise ImportError(f"unsupported comfy_extras module: {module}")
+    return mod
+
+
 def _extra(module, class_name, **kwargs):
     try:
-        cls = getattr(importlib.import_module(f"comfy_extras.{module}"), class_name)
+        cls = getattr(_comfy_extras_module(module), class_name)
     except (ImportError, AttributeError) as exc:
         raise RuntimeError(
             f"ComfyUI 코어 '{class_name}' 기능이 없습니다. MiniMax H3 Image 지원 최신 ComfyUI로 업데이트하고 재시작하세요."
@@ -339,7 +359,7 @@ def _minimax_prepare_target(image, width, height, resolution_mode):
         result = _fit_image_to_canvas(image, canvas_w, canvas_h)
     else:
         try:
-            processing = importlib.import_module("comfy_extras.nodes_post_processing")
+            processing = _comfy_extras_module("nodes_post_processing")
             if native is not None:
                 # Official resize helper retains the image's proportions by
                 # cropping the center to its exact demonstrated 16MP canvas.

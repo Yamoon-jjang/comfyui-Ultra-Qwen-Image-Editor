@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — v1.0.5
+# Ultra Qwen Image Editor + PiD — v1.0.6
 
 **Qwen 2511·2.1 + MiniMax H3 Image 통합 편집 / Multi-family native ComfyUI image editor**
 
