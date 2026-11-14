@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — User Manual v1.0.4
+# Ultra Qwen Image Editor + PiD — User Manual v1.0.5
 
 ## Purpose and supported models
 
@@ -6,6 +6,7 @@ This custom node edits reference images directly in ComfyUI. Supported model fam
 
 - **Qwen Image Edit 2511**: up to 3 connected images; optional QwenImage-compatible PiD upscaling.
 - **Qwen Image 2.1 Base / Turbo**: up to 10 connected images; PiD unavailable for this family.
+- **MiniMax H3 Image**: up to 16 connected images; native H3 image conditioning; PiD disabled.
 
 A Qwen text-to-image checkpoint (for example a clearly named Qwen Image 2512 generation model) is not a replacement for a compatible editing checkpoint.
 
@@ -37,7 +38,8 @@ The node UI automatically follows the selected Korean/English ComfyUI locale. Wi
 | Family | Diffusion model | Text encoder | VAE |
 | --- | --- | --- | --- |
 | Qwen Image Edit 2511 | Qwen Image Edit 2511 compatible checkpoint | Qwen 2.5 VL 7B | Qwen Image VAE |
-| Qwen Image 2.1 | Qwen Image 2.1 Base/Turbo compatible checkpoint | Qwen3 VL compatible encoder | Qwen Image 2.1 VAE |
+| Qwen Image 2.1 | Qwen Image 2.1 Base/Turbo compatible checkpoint | Qwen3 VL compatible encoder (not MiniMax H3) | Qwen Image 2.1 VAE |
+| MiniMax H3 Image | `minimax_h3_image_pruned_int8_convrot.safetensors` | `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | `minimax_h3_image_vae_fp16.safetensors` |
 
 Exact asset filenames vary by source and precision. Explicitly incompatible families are rejected, while a custom model with a neutral filename is not guaranteed compatible. When `<select installed model>` appears, install/select the correct matching asset before running.
 
@@ -49,7 +51,7 @@ Exact asset filenames vary by source and precision. Explicitly incompatible fami
 4. Adjust resolution, Steps, CFG, Sampler, Scheduler and optional LoRAs.
 5. Connect `Edited Image` to `Save Image`, then queue generation.
 
-`image1` always exists. Additional ports appear as images are connected; the maximum is 3 for 2511 and 10 for 2.1. Connect consecutively, without gaps. Disconnect higher-numbered inputs before switching to a family with fewer allowed images.
+`image1` always exists. Additional ports appear as images are connected; maximum: **3 for 2511, 10 for 2.1, 16 for MiniMax H3**. Connect consecutively, without gaps. If any higher-numbered input is connected, the node **warns and refuses** switching to a family with a smaller limit. **You** must disconnect extra links manually; **no links are automatically removed**.
 
 ### Choosing an image to edit
 
@@ -67,6 +69,16 @@ Recognized forms include `image1`, `image 2`, `image_2`, `Picture 2:`, `이미�
 
 ComfyUI/core implementations may round dimensions to latent-grid multiples (16 for 2511, 32 for 2.1). In Qwen 2.1 `original`/`custom` mode, additional non-target references can be bounded to about 1 MP to reduce encoder load. Larger resolutions increase VRAM/time requirements.
 
+### MiniMax H3 image preprocessing
+
+Requires current ComfyUI with `MiniMaxH3ImageConditioning`. H3 uses its own resolution list: **4MP (default), 8MP, 16MP, original, custom**. The MP presets use *area* resize and 32-pixel **cover-crop**, not stretch-to-fit. At 16MP, source images within 3% of an official native aspect are instead center-cropped with ComfyUI's core resize helper to that exact native canvas. Other aspect ratios retain the normal area/cover path. `original` only performs the 32px cover-crop. `custom` is a convenience mode that fits the complete image with padding onto a 32px-aligned canvas. The exact processed width/height are explicitly passed to H3 conditioning, preventing unintended 0/0 dimension fallback. Very high MP settings require substantial memory.
+
+ComfyUI officially lists native ~16MP H3 output including 4096×4096, 4736×3552, 5024×3360, 5472×3072 and 6272×2688. These are model outputs, not PiD enlargements. The editor validates the projected 32px cover-crop dimensions **before** allocating an enlarged source image; MiniMax H3 uses the native core's 16384px per-axis limit, while the two older Qwen families retain their 8192px limit. In H3 `custom` mode, Width=Height=0 uses approximately 4MP; one zero dimension derives from source aspect ratio.
+
+On first selection of MiniMax H3, available `int8_convrot` diffusion/encoder files are preferred over BF16. A user's previously saved model selection is never replaced by this preference. If changing to a lower-cap family would leave excess linked images, the warning identifies the affected sockets and count; image disconnection remains manual.
+
+The target image is internally encoded as `<Picture 1>`; other connected inputs are reordered in sequence. English/Korean explicit `imageN` references are converted into `<Picture N>` for MiniMax, preserving the target mapping. Each IMAGE input accepts a batch of exactly one RGB/RGBA image.
+
 ## Sampling behavior
 
 | Model family | Initial Steps / CFG | Sampling behavior |
@@ -74,10 +86,13 @@ ComfyUI/core implementations may round dimensions to latent-grid multiples (16 f
 | Qwen Image Edit 2511 | 20 / 4 | KSampler |
 | Qwen Image 2.1 Base | 25 / 1 | KSampler |
 | Qwen Image 2.1 Turbo | 8 / 1 | At exactly 8 steps, built-in ManualSigmas; otherwise KSampler |
+| MiniMax H3 Image | 6 / 1 | Native H3 positive + 5D latent, euler/simple, Zero Conditioning ON |
 
-For a Turbo filename, **exactly Steps=8** uses the built-in eight-interval sigma schedule, with editable CFG and the selected Sampler. The Scheduler widget is ignored only on that path. Any other Turbo step value runs KSampler with the selected Scheduler. All sampling controls remain editable.
+For a Turbo filename, **exactly Steps=8** uses the built-in eight-interval sigma schedule, with editable CFG and the selected Sampler. The Scheduler widget is ignored only on that path. Any other Turbo step value runs KSampler with the selected Scheduler. Qwen sampling controls remain editable; MiniMax H3's six-step distilled sampling controls stay locked.
 
 `Zero Conditioning = ON` zeroes the negative conditioning; `OFF` encodes the entered Negative Prompt. Negative-prompt guidance can be ineffective at CFG=1.
+
+For MiniMax H3, **Steps/CFG/Sampler/Scheduler/Zero Conditioning** are locked to **6/1/euler/simple/ON** and the Negative Prompt widget is inactive; its text is preserved for other models. The separate RAM model-reuse cache and PiD are OFF for H3. Compatible H3-specific LoRAs can be applied on the model path; compatibility must be checked with the chosen checkpoint. External prompt expansion is optional and not bundled into this custom node.
 
 ## LoRA
 
@@ -90,11 +105,11 @@ With `PiD Upscale = ON`, an additional QwenImage-compatible PiD pass upscales th
 - `Edited Image`: decoded result before PiD.
 - `PiD Image`: PiD result (or the same edited image if PiD is OFF).
 
-The internal x4 processing dimension cannot exceed 8192px on its longest side. PiD requires a compatible QwenImage PiD checkpoint and Gemma 2 ELM encoder. Qwen 2.1 does not support PiD in this node.
+The internal x4 processing dimension cannot exceed 8192px on its longest side. PiD requires a compatible QwenImage PiD checkpoint and Gemma 2 ELM encoder. Qwen 2.1 and MiniMax H3 do not support PiD in this node.
 
 ## Caching, profiles, and workflow files
 
-`Reuse Models (RAM)` retains unchanged loaded model/encoder/VAE assets within a conservative system RAM budget; it does not enlarge GPU VRAM. Disable it for a run to clear the node's retained references. PiD may need extra RAM and model files.
+`Reuse Models (RAM)` retains unchanged loaded model/encoder/VAE assets within a conservative system RAM budget; it does not enlarge GPU VRAM. Disable it for a run to clear the node's retained references. MiniMax H3 forces this setting OFF to avoid pinning very large H3 assets. PiD may need extra RAM and model files.
 
 Model-specific profiles include model file selections, sampling settings, Zero Conditioning, PiD settings and LoRAs. They are **committed after successful queue submission**, not after finished image rendering. Edits made before queuing are kept as temporary drafts during model switching in the current editor session. Positive/Negative prompts, PiD scene prompt, edit target, resolution and seed remain the current task's values when models change. Save your ComfyUI workflow separately for persistent storage.
 
@@ -111,7 +126,9 @@ ComfyUI's `Comfy.Locale` setting controls translated widget labels, tooltips, Lo
 - No images: connect `image1` before queuing.
 - Gaps in IMAGE sockets: connect `image1`, `image2`, etc. consecutively.
 - `<select installed model>`: install and select matching Qwen model, encoder and VAE.
-- PiD disabled on 2.1: this is expected; PiD is supported only for 2511.
+- PiD disabled on 2.1/H3: expected; PiD is supported only for 2511.
+- Cannot switch family: manually disconnect all linked `imageN` sockets above the desired family's 3/10/16 limit; the node never removes them automatically.
+- H3 asset detection mismatch: install the dedicated MiniMax H3 diffusion, Qwen3-VL H3 encoder and VAE files; do not reuse the Qwen 2.1 text encoder.
 - Missing PiD checkpoint/Gemma: install compatible PiD and Gemma 2 ELM files.
 - Out of VRAM: lower output resolution, image count or disable PiD.
 - LoRA not listed: check `models/loras` and refresh the list.

@@ -1,6 +1,6 @@
 """Ultra Qwen Image Editor + PiD — local ComfyUI core-node orchestration.
 
-Qwen-only native ComfyUI node with dynamic IMAGE sockets, built-in
+Native ComfyUI image editor with dynamic IMAGE sockets, built-in
 positive/negative prompts, target-image selection, per-family LoRA rows,
 optional PiD upscale, and auto/custom dimensions.
 """
@@ -18,18 +18,24 @@ import nodes
 
 from .ultra_prompt_record import record_prompt, register as register_prompt_record
 
-FAMILIES = ("Qwen Image Edit 2511", "Qwen Image 2.1")
+FAMILIES = ("Qwen Image Edit 2511", "Qwen Image 2.1", "MiniMax H3 Image")
 CAPS = {
     "Qwen Image Edit 2511": 3,
     "Qwen Image 2.1": 10,
+    "MiniMax H3 Image": 16,
 }
 PID_SPACE = {
     "Qwen Image Edit 2511": "qwenimage",
     "Qwen Image 2.1": None,
+    "MiniMax H3 Image": None,
 }
 NONE = "<select installed model>"
 PID_AUTO = "<auto select PiD>"
 MAX_DIM = 8192
+# The native MiniMax conditioning inputs use ComfyUI's 16384px axis limit.
+# This is independent of its officially demonstrated ~16MP pixel area.
+# Keep the older Qwen/PiD 8192px contract unchanged.
+MINIMAX_MAX_DIM = 16384
 AUTO_PIXELS = 1024 * 1024
 # Stable serialization tokens. Size is an approximate pixel budget, not a
 # hard output cap: Qwen 2.1 rounds each axis to 32px independently.
@@ -38,8 +44,21 @@ RESOLUTION_PIXELS = {
     "0.5MP": AUTO_PIXELS // 2,
     "1.5MP": AUTO_PIXELS * 3 // 2,
     "2MP": AUTO_PIXELS * 2,
+    "4MP": AUTO_PIXELS * 4,
+    "8MP": AUTO_PIXELS * 8,
+    "16MP": AUTO_PIXELS * 16,
 }
 RESOLUTION_MODES = (*RESOLUTION_PIXELS, "original", "custom")
+MINIMAX_RESOLUTION_MODES = ("4MP", "8MP", "16MP", "original", "custom")
+LEGACY_RESOLUTION_MODES = ("auto_1mp", "0.5MP", "1.5MP", "2MP", "original", "custom")
+MAX_IMAGE_INPUTS = max(CAPS.values())
+# Native MiniMax H3 Image 16MP reference canvases. The opposite orientation
+# is also valid; use these only when the source aspect is already close.
+# This preserves the source's composition (center crop, never stretch) while
+# retaining the existing pre-allocation safety check for extreme ratios.
+MINIMAX_NATIVE_16MP = ((4096, 4096), (4736, 3552), (5024, 3360),
+                       (5472, 3072), (6272, 2688))
+MINIMAX_NATIVE_ASPECT_TOLERANCE = 0.03
 
 # One entry per role; all asset roles share a conservative admission-only RAM budget.
 # ComfyUI controls GPU/VRAM residency; this cache only retains original loader
@@ -81,6 +100,20 @@ KOREAN_REF_PATTERN = re.compile(
     r"(?P<after_ordinal>[ \t]*)(?P<reversed_name>이미지|사진|그림)"
     r")(?![A-Za-z0-9_])"
 )
+
+
+# A number followed by a separately written counter is a quantity, not an
+# IMAGE slot: "사진 2 장을" must stay text while "이미지 2 배경" is a slot.
+_SPACED_QUANTITY_SUFFIX_RE = re.compile(
+    r"[ \t]+(?:배|매|초|장|개|명|분|픽셀|px)"
+    r"(?=$|[ \t\r\n,.!?;:]|(?:을|를|이|가|은|는|의|에|으로|로|과|와|도|만|씩|까지|부터)(?![가-힣]))",
+    re.I,
+)
+
+
+def _has_spaced_quantity_suffix(text, match):
+    return (match.group("n") is not None and not match.group("ordinal")
+            and _SPACED_QUANTITY_SUFFIX_RE.match(text, match.end()) is not None)
 
 
 class _AnyType(str):
@@ -173,7 +206,12 @@ def _core(name, **kwargs):
 
 
 def _extra(module, class_name, **kwargs):
-    cls = getattr(importlib.import_module(f"comfy_extras.{module}"), class_name)
+    try:
+        cls = getattr(importlib.import_module(f"comfy_extras.{module}"), class_name)
+    except (ImportError, AttributeError) as exc:
+        raise RuntimeError(
+            f"ComfyUI 코어 '{class_name}' 기능이 없습니다. MiniMax H3 Image 지원 최신 ComfyUI로 업데이트하고 재시작하세요."
+        ) from exc
     fn = getattr(cls, "execute", None)
     if fn is None:
         obj = cls()
@@ -202,7 +240,10 @@ def _dimensions(image, family, width, height, resolution_mode="auto_1mp"):
         raise ValueError("수정 대상 이미지의 최소 크기는 16px입니다.")
     if resolution_mode not in RESOLUTION_MODES:
         raise ValueError(f"지원되지 않는 해상도 모드: {resolution_mode}")
-    multiple = 32 if family == "Qwen Image 2.1" else 16
+    if family != "MiniMax H3 Image" and resolution_mode not in LEGACY_RESOLUTION_MODES:
+        raise ValueError(f"{family}은 {resolution_mode} 해상도 모드를 지원하지 않습니다.")
+    multiple = 32 if family in ("Qwen Image 2.1", "MiniMax H3 Image") else 16
+    max_dimension = MINIMAX_MAX_DIM if family == "MiniMax H3 Image" else MAX_DIM
     manual_w, manual_h = int(width), int(height)
     if manual_w < 0 or manual_h < 0:
         raise ValueError("가로/세로는 0 이상이어야 합니다.")
@@ -216,18 +257,105 @@ def _dimensions(image, family, width, height, resolution_mode="auto_1mp"):
         requested_w, requested_h = source_w, source_h
     else:
         # When custom dimensions are both zero, fall back to ~1MP while the
-        # user chooses a size; all other presets ignore inactive width/height.
-        pixels = RESOLUTION_PIXELS.get(resolution_mode, AUTO_PIXELS)
+        # user chooses a size. H3's native first-use canvas is ~4MP, unlike
+        # the existing Qwen families. Other presets ignore inactive dimensions.
+        pixels = RESOLUTION_PIXELS.get(resolution_mode,
+            RESOLUTION_PIXELS["4MP"] if family == "MiniMax H3 Image" else AUTO_PIXELS)
         ratio = source_w / source_h
         requested_w = max(16, round(math.sqrt(pixels * ratio)))
         requested_h = max(16, round(math.sqrt(pixels / ratio)))
-    if min(requested_w, requested_h) < 16 or max(requested_w, requested_h) > MAX_DIM:
-        raise ValueError("가로/세로는 자동(0) 또는 16~8192px 범위여야 합니다.")
+    if min(requested_w, requested_h) < 16 or max(requested_w, requested_h) > max_dimension:
+        raise ValueError(f"가로/세로는 자동(0) 또는 16~{max_dimension}px 범위여야 합니다.")
     w = max(multiple, ((requested_w + multiple // 2) // multiple) * multiple)
     h = max(multiple, ((requested_h + multiple // 2) // multiple) * multiple)
-    if max(w, h) > MAX_DIM:
+    if max(w, h) > max_dimension:
         raise ValueError("잠재 공간 배수 정렬 후 해상도 제한을 초과했습니다.")
     return w, h
+
+
+def _minimax_native_16mp_size(image):
+    """Return the nearest official native canvas for an aspect within 3%."""
+    ratio = int(image.shape[2]) / int(image.shape[1])
+    closest = None
+    max_log_delta = math.log1p(MINIMAX_NATIVE_ASPECT_TOLERANCE)
+    for landscape_w, landscape_h in MINIMAX_NATIVE_16MP:
+        for width, height in {(landscape_w, landscape_h), (landscape_h, landscape_w)}:
+            delta = abs(math.log(ratio / (width / height)))
+            if delta <= max_log_delta and (closest is None or delta < closest[0]):
+                closest = delta, width, height
+    return None if closest is None else (closest[1], closest[2])
+
+
+def _minimax_expected_cover_size(image, resolution_mode):
+    """Preflight the official area->32px cover output without allocating pixels.
+
+    Mirrors nodes_post_processing.scale_total_pixels and
+    scale_to_multiple_cover: the first stage rounds to nearest integer and
+    the second crops both axes DOWN to a multiple of 32.
+    """
+    source_w, source_h = int(image.shape[2]), int(image.shape[1])
+    if resolution_mode == "16MP":
+        native = _minimax_native_16mp_size(image)
+        if native is not None:
+            return native
+    if resolution_mode == "original":
+        scaled_w, scaled_h = source_w, source_h
+    else:
+        budget = RESOLUTION_PIXELS[resolution_mode]
+        factor = math.sqrt(budget / (source_w * source_h))
+        scaled_w, scaled_h = round(source_w * factor), round(source_h * factor)
+    # The native cover node returns its input unmodified if either axis would
+    # round down to zero. It therefore cannot produce an aligned H3 canvas.
+    return (scaled_w // 32) * 32, (scaled_h // 32) * 32
+
+
+def _minimax_prepare_target(image, width, height, resolution_mode):
+    """Follow official H3 editor: total-pixel area resize, then 32px cover-crop.
+
+    Original deliberately skips area scaling; custom keeps the entire source
+    by fitting/padding it into the user-requested aligned output canvas.
+    Other references are left intact for native conditioning preprocessing.
+    """
+    if resolution_mode not in MINIMAX_RESOLUTION_MODES:
+        raise ValueError("MiniMax H3 Image: 4MP / 8MP / 16MP / Original / Custom에서 해상도를 선택하세요.")
+    if image.ndim != 4 or int(image.shape[0]) != 1 or int(image.shape[-1]) not in (3, 4):
+        raise ValueError("MiniMax H3 Image: IMAGE는 RGB/RGBA 배치 1장만 지원합니다.")
+    if min(int(image.shape[1]), int(image.shape[2])) < 16:
+        raise ValueError("MiniMax H3 Image: 수정 대상 이미지의 최소 크기는 16px입니다.")
+    native = _minimax_native_16mp_size(image) if resolution_mode == "16MP" else None
+    if resolution_mode == "custom":
+        canvas_w, canvas_h = _dimensions(image, "MiniMax H3 Image", width, height, "custom")
+        output_w, output_h = canvas_w, canvas_h
+    else:
+        output_w, output_h = _minimax_expected_cover_size(image, resolution_mode)
+    # Validate BEFORE the official area upscaler: extreme aspect ratios at
+    # 16MP can exceed a native axis limit even with a valid total pixel area.
+    if min(output_w, output_h) < 32 or max(output_w, output_h) > MINIMAX_MAX_DIM:
+        raise ValueError(
+            f"MiniMax H3 Image: 전처리 예상 크기 {output_w}×{output_h}px는 "
+            f"각 변 32~{MINIMAX_MAX_DIM}px 범위를 벗어납니다. 해상도 또는 이미지 비율을 확인하세요."
+        )
+    if resolution_mode == "custom":
+        result = _fit_image_to_canvas(image, canvas_w, canvas_h)
+    else:
+        try:
+            processing = importlib.import_module("comfy_extras.nodes_post_processing")
+            if native is not None:
+                # Official resize helper retains the image's proportions by
+                # cropping the center to its exact demonstrated 16MP canvas.
+                result = processing.scale_dimensions(image, native[0], native[1], "area", "center")
+            elif resolution_mode == "original":
+                result = image
+            else:
+                result = processing.scale_total_pixels(image, RESOLUTION_PIXELS[resolution_mode] / AUTO_PIXELS, "area")
+            if native is None:
+                result = processing.scale_to_multiple_cover(result, 32, "area")
+        except (ImportError, AttributeError) as exc:
+            raise RuntimeError("ComfyUI ResizeImageMaskNode 전처리를 사용할 수 없습니다. ComfyUI를 업데이트하세요.") from exc
+    output_w, output_h = int(result.shape[2]), int(result.shape[1])
+    if min(output_w, output_h) < 32 or max(output_w, output_h) > MINIMAX_MAX_DIM or output_w % 32 or output_h % 32:
+        raise ValueError(f"MiniMax H3 Image: 전처리 결과는 32배수이며 각 변이 32~{MINIMAX_MAX_DIM}px이어야 합니다.")
+    return result, output_w, output_h
 
 
 def _fit_image_to_canvas(image, width, height):
@@ -254,7 +382,7 @@ def _fit_image_to_canvas(image, width, height):
 def _connected(images, family, target):
     max_count = CAPS[family]
     present = []
-    for i in range(1, 11):
+    for i in range(1, MAX_IMAGE_INPUTS + 1):
         v = images.get(f"image{i}")
         if v is not None:
             if i > max_count:
@@ -303,10 +431,8 @@ def _rewrite_prompt(text, connected_indices, ordering):
         # Only a separated unit needs an extra ambiguity check: "사진 2 장"
         # otherwise resembles "이미지 1 옷" because both contain a space.
         # Attached units (2배/2매/2초/2개/2장) already fail the whitelist.
-        if match.group("n") is not None and not match.group("ordinal"):
-            suffix = original[match.end():]
-            if re.match(r"[ \t]+(?:배|매|초|장|개|명|분|픽셀|px)(?=$|[ \t\r\n,.!?;:])", suffix, re.I):
-                return match.group(0)
+        if _has_spaced_quantity_suffix(english_rewritten, match):
+            return match.group(0)
         n = int(match.group("n") or match.group("before_n"))
         if n not in mapping:
             return match.group(0)
@@ -317,7 +443,39 @@ def _rewrite_prompt(text, connected_indices, ordering):
                 f'{match.group("before_ordinal")}{match.group("after_ordinal")}'
                 f'{match.group("reversed_name")}')
 
-    return KOREAN_REF_PATTERN.sub(sub_korean, REF_PATTERN.sub(sub_english, original))
+    # Korean match offsets refer to the English-rewritten string, not to the
+    # original text (whose length can change when image12 is renumbered).
+    english_rewritten = REF_PATTERN.sub(sub_english, original)
+    return KOREAN_REF_PATTERN.sub(sub_korean, english_rewritten)
+
+
+def _minimax_picture_references(rewritten_prompt, count):
+    """Convert only explicit image-slot citations to MiniMax <Picture N> form.
+
+    The existing Qwen remapper runs first, so these numbers already correspond
+    to the edit-target-first ordering. Preserve particles and ordinary counts.
+    """
+    original = str(rewritten_prompt or "")
+
+    def english(match):
+        if (match.group("name").lower() == "picture"
+                and match.group("gap").isspace()
+                and not match.group("before") and not match.group("after")
+                and not original[match.end():].lstrip().startswith(":")):
+            return match.group(0)
+        number = int(match.group("n"))
+        return f"<Picture {number}>" if 1 <= number <= count else match.group(0)
+
+    def korean(match):
+        # The first (Qwen) pass leaves quantities untouched; the H3-only
+        # second pass must not convert them into <Picture N> either.
+        if _has_spaced_quantity_suffix(english_rewritten, match):
+            return match.group(0)
+        number = int(match.group("n") or match.group("before_n"))
+        return f"<Picture {number}>" if 1 <= number <= count else match.group(0)
+
+    english_rewritten = REF_PATTERN.sub(english, original)
+    return KOREAN_REF_PATTERN.sub(korean, english_rewritten)
 
 
 def _validate_family_files(family, encoder_name, vae_name, model_name=None):
@@ -329,11 +487,14 @@ def _validate_family_files(family, encoder_name, vae_name, model_name=None):
     # Arbitrarily named compatible fine-tunes remain allowed.
     is_21 = bool(re.search(r"qwen(?:[_ .-]*image)?[_ .-]*(?:2[._-]?1|21)(?![0-9])", filename))
     is_2511 = bool(re.search(r"qwen.*(?:edit.*2511|2511.*edit)|qedit.*2511", filename))
+    is_h3_image = bool(re.search(r"minimax.*h3.*image", filename))
     unrelated = bool(re.search(r"(?:^|[_ .-])(?:flux(?:1|2)?|sdxl|hunyuan|wan2?[._-]?\d*|z[_-]?image)(?:[_ .-]|$)", filename))
     # The explicitly named 2512 Qwen Image text-to-image checkpoint is not an
     # image editor for either supported family. Do not block neutral aliases.
     t2i_2512 = bool(re.search(r"qwen[_ .-]*image[_ .-]*2512(?![0-9])", filename) and "edit" not in filename)
-    if unrelated or t2i_2512 or (family == "Qwen Image Edit 2511" and is_21) or (family == "Qwen Image 2.1" and is_2511):
+    if (unrelated or (t2i_2512 and family != "MiniMax H3 Image")
+            or (family == "Qwen Image Edit 2511" and (is_21 or is_h3_image))
+            or (family == "Qwen Image 2.1" and (is_2511 or is_h3_image))):
         raise ValueError(f"선택한 확산 모델 파일이 {family} 계열과 맞지 않습니다: {model_name}")
     if family == "Qwen Image Edit 2511":
         if re.search(r"qwen[_-]?3(?:[_-]|\d|$)", te) or "qwen3vl" in te or "qwen3-vl" in te:
@@ -341,10 +502,19 @@ def _validate_family_files(family, encoder_name, vae_name, model_name=None):
         if re.search(r"qwen[_-]?image[_-]?(?:2[._-]?1|21)[_-]?vae", vae):
             raise ValueError("Qwen Edit 2511에는 Qwen Image VAE를 선택하세요 (Qwen 2.1 VAE 아님).")
     elif family == "Qwen Image 2.1":
+        if "minimax" in te or "minimax" in vae:
+            raise ValueError("Qwen Image 2.1에 MiniMax H3 전용 인코더·VAE를 선택할 수 없습니다.")
         if "qwen_2.5_vl" in te or "qwen-2.5-vl" in te or "qwen2.5vl" in te:
             raise ValueError("Qwen Image 2.1에는 Qwen3 VL 호환 텍스트 인코더를 선택하세요.")
         if re.search(r"qwen[_-]?image[_-]?vae(?:[_-]|\.|$)", vae):
             raise ValueError("Qwen Image 2.1에는 Qwen 2.1 전용 VAE를 선택하세요.")
+    elif family == "MiniMax H3 Image":
+        if not is_h3_image:
+            raise ValueError("MiniMax H3 Image 전용 diffusion checkpoint를 선택하세요.")
+        if not re.search(r"qwen3[._-]?vl.*minimax[._-]?h3", te):
+            raise ValueError("MiniMax H3 Image 전용 Qwen3-VL 텍스트 인코더를 선택하세요.")
+        if not re.search(r"minimax[._-]?h3[._-]?image.*vae", vae):
+            raise ValueError("MiniMax H3 Image 전용 VAE를 선택하세요.")
 
 
 def _asset_key(folder, name, kind):
@@ -418,7 +588,9 @@ def _load_model_assets(model_name, encoder_name, vae_name, family=None, reuse_as
     model = _cached_loader("main_model", "diffusion_models", model_name,
         lambda: _core("UNETLoader", unet_name=model_name, weight_dtype="default")[0], reuse_assets=reuse_assets)
     clip = _cached_loader("main_clip", "text_encoders", encoder_name,
-        lambda: _core("CLIPLoader", clip_name=encoder_name, type="qwen_image", device="default")[0], reuse_assets=reuse_assets)
+        lambda: _core("CLIPLoader", clip_name=encoder_name,
+                      type="minimax" if family == "MiniMax H3 Image" else "qwen_image", device="default")[0],
+        reuse_assets=reuse_assets)
     vae = _cached_loader("main_vae", "vae", vae_name,
         lambda: _core("VAELoader", vae_name=vae_name)[0], reuse_assets=reuse_assets)
     return model, clip, vae
@@ -481,7 +653,7 @@ def _pid_files():
 
 def _pid_target_model(family, candidate):
     if PID_SPACE[family] is None:
-        raise ValueError("Qwen Image 2.1은 PiD 비활성화 모델입니다.")
+        raise ValueError(f"{family}은 PiD 비활성화 모델입니다.")
     choices = [
         name
         for name in _pid_files()
@@ -582,8 +754,24 @@ def _pid_color_match(image, original):
 
 
 def _family_edit(family, model, model_name, clip, vae, images, order, prompt, negative_prompt,
-                 width, height, seed, steps, cfg, sampler, scheduler, zero_conditioning, resolution_mode="auto_1mp"):
+                 width, height, seed, steps, cfg, sampler, scheduler, zero_conditioning,
+                 resolution_mode="auto_1mp", minimax_target=None):
     target = images[f"image{order[0]}"]
+    if family == "MiniMax H3 Image":
+        if minimax_target is None:
+            minimax_target = _minimax_prepare_target(target, width, height, resolution_mode)
+        target_image, w, h = minimax_target
+        refs = [target_image] + [images[f"image{i}"] for i in order[1:]]
+        positive, latent = _extra(
+            "nodes_minimax_h3", "MiniMaxH3ImageConditioning",
+            clip=clip, prompt=prompt, width=w, height=h, vae=vae,
+            images={f"image_{i + 1}": ref for i, ref in enumerate(refs)},
+        )
+        negative = _zero(positive)
+        sampled = _regular_sample(model, positive, negative, latent, seed, 6, 1.0, "euler", "simple")
+        image = _core("VAEDecode", vae=vae, samples=sampled)[0]
+        return image, sampled, w, h
+
     w, h = _dimensions(target, family, width, height, resolution_mode)
     refs = [images[f"image{i}"] for i in order]
 
@@ -603,7 +791,7 @@ def _family_edit(family, model, model_name, clip, vae, images, order, prompt, ne
             "nodes_qwen", "TextEncodeQwenImageEditPlus", clip=clip, prompt=negative_prompt, vae=vae, **kwargs
         )[0]
         latent = _empty(w, h)
-    else:
+    elif family == "Qwen Image 2.1":
         if resolution_mode == "custom" and (int(width) or int(height)):
             refs[0] = _fit_image_to_canvas(refs[0], w, h)
             core_resolution = 0  # Preserve the explicit, padded custom canvas.
@@ -638,6 +826,8 @@ def _family_edit(family, model, model_name, clip, vae, images, order, prompt, ne
         if zero_conditioning:
             negative = _zero(negative)
         w, h = int(latent["samples"].shape[3]) * 16, int(latent["samples"].shape[2]) * 16
+    else:
+        raise ValueError(f"지원되지 않는 이미지 편집 계열: {family}")
 
     turbo_mode = family == "Qwen Image 2.1" and "turbo" in str(model_name).lower().replace("\\", "/").split("/")[-1]
     if turbo_mode and int(steps) == 8:
@@ -654,7 +844,7 @@ class UltraImageEditorPiD:
     RETURN_TYPES = ("IMAGE", "IMAGE")
     RETURN_NAMES = ("Edited Image", "PiD Image")
     OUTPUT_NODE = False
-    DESCRIPTION = "Native Qwen image editor (2511 / 2.1). image1..N are numbered references; Edit Target selects the photo to modify.\nQwen 이미지 편집기. 수정 대상 이미지를 선택하고 프롬프트로 편집합니다."
+    DESCRIPTION = "Native Qwen 2511 / Qwen 2.1 / MiniMax H3 Image editor. Dynamic image1..N inputs support 3 / 10 / 16 references per family.\nQwen·MiniMax 이미지 편집기. 모델별 이미지 최대 3·10·16장과 수정 대상 선택을 지원합니다."
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -668,11 +858,11 @@ class UltraImageEditorPiD:
                 "vae_name": (_choices("vae"),),
                 "positive_text": ("STRING", {"multiline": True, "default": "", "tooltip": "Edit instruction. Direct Qwen image1/image2 references and Prompt Selecter output work without conversion."}),
                 "negative_text": ("STRING", {"multiline": True, "default": "", "tooltip": "Negative prompt; when Zero Conditioning is ON the model's unconditional branch is used instead."}),
-                "edit_target": (("auto",) + tuple(f"image{i}" for i in range(1, 11)),
+                "edit_target": (("auto",) + tuple(f"image{i}" for i in range(1, MAX_IMAGE_INPUTS + 1)),
                                 {"default": "auto", "tooltip": "auto uses image1. Select a connected imageN to edit a different image."}),
                 "resolution_mode": (RESOLUTION_MODES, {"default": "auto_1mp", "tooltip": "Preserve the edit target aspect ratio: Auto ~1MP / 0.5MP / 1.5MP / 2MP / Original. Custom enables Width/Height and fits the source into a padded canvas when the aspect ratio changes."}),
-                "width": ("INT", {"default": 0, "min": 0, "max": MAX_DIM, "step": 16, "tooltip": "Used only in Custom resolution mode. 0 = derive width from the target image aspect ratio.", "hidden": True}),
-                "height": ("INT", {"default": 0, "min": 0, "max": MAX_DIM, "step": 16, "tooltip": "Used only in Custom resolution mode. 0 = derive height from the target image aspect ratio.", "hidden": True}),
+                "width": ("INT", {"default": 0, "min": 0, "max": MINIMAX_MAX_DIM, "step": 16, "tooltip": "Used only in Custom resolution mode. 0 = derive width from the target image aspect ratio.", "hidden": True}),
+                "height": ("INT", {"default": 0, "min": 0, "max": MINIMAX_MAX_DIM, "step": 16, "tooltip": "Used only in Custom resolution mode. 0 = derive height from the target image aspect ratio.", "hidden": True}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True}),
                 "steps": ("INT", {"default": 20, "min": 1, "max": 1000}),
                 "cfg": ("FLOAT", {"default": 4.0, "min": 0, "max": 50, "step": 0.1}),
@@ -691,7 +881,7 @@ class UltraImageEditorPiD:
             },
             "optional": {},
         }
-        for i in range(1, 11):
+        for i in range(1, MAX_IMAGE_INPUTS + 1):
             specs["optional"][f"image{i}"] = ("IMAGE",)
         specs["optional"] = _FlexibleOptionalInputs(specs["optional"])
         # Used only to record the encoded prompt in saved image metadata.
@@ -707,19 +897,33 @@ class UltraImageEditorPiD:
         unique_id = inputs.pop("unique_id", None)
         if model_family not in CAPS:
             raise ValueError(f"지원되지 않는 모델 계열: {model_family}")
-        images = {key: value for key, value in inputs.items() if re.fullmatch(r"image(?:[1-9]|10)", key)}
+        images = {key: value for key, value in inputs.items() if re.fullmatch(r"image(?:[1-9]|1[0-6])", key)}
         connected, target, ordering = _connected(images, model_family, edit_target)
         lora_rows = _collect_loras(inputs)
         if not str(positive_text or "").strip():
             raise ValueError("긍정 프롬프트가 비어 있습니다. 노드 내부에 편집 지시를 입력하세요.")
         prompt = _rewrite_prompt(positive_text, connected, ordering)
         neg_prompt = _rewrite_prompt(negative_text, connected, ordering)
+        if model_family == "MiniMax H3 Image":
+            if (int(steps), float(cfg), sampler_name, scheduler, bool(zero_conditioning)) != (6, 1.0, "euler", "simple", True):
+                raise ValueError("MiniMax H3 Image는 Steps 6 / CFG 1 / euler / simple / Zero Conditioning ON 고정입니다.")
+            prompt = _minimax_picture_references(prompt, len(ordering))
+            neg_prompt = ""  # H3 has no effective negative prompt.
         if pid_upscale and PID_SPACE[model_family] is None:
-            raise ValueError("Qwen Image 2.1은 현재 네이티브 PiD를 지원하지 않습니다. PiD를 OFF로 설정하세요.")
+            raise ValueError(f"{model_family}은 현재 네이티브 PiD를 지원하지 않습니다. PiD를 OFF로 설정하세요.")
         if pid_upscale:
             _pid_target_model(model_family, pid_model)
             _pid_clip_name()
-        _dimensions(images[f"image{ordering[0]}"], model_family, width, height, resolution_mode)
+        minimax_target = None
+        if model_family == "MiniMax H3 Image":
+            # Reject invalid resolution and process the image once, before any
+            # heavyweight model loading. The exact result feeds H3 conditioning.
+            minimax_target = _minimax_prepare_target(
+                images[f"image{ordering[0]}"], width, height, resolution_mode
+            )
+            reuse_assets = False  # Do not pin the huge H3 model / encoder in this node's RAM cache.
+        else:
+            _dimensions(images[f"image{ordering[0]}"], model_family, width, height, resolution_mode)
         # Reject oversized PiD before allocating any model weights.
         if pid_upscale:
             preview_w, preview_h = _dimensions(images[f"image{ordering[0]}"], model_family,
@@ -754,6 +958,7 @@ class UltraImageEditorPiD:
                 scheduler,
                 bool(zero_conditioning),
                 resolution_mode,
+                minimax_target,
             )
         except Exception as exc:
             raise RuntimeError(f"{model_family} 편집 실행 실패: {exc}") from exc
@@ -761,7 +966,7 @@ class UltraImageEditorPiD:
         record_prompt(
             extra_pnginfo, unique_id, "UltraImageEditorPiD",
             positive=prompt,
-            negative=None if zero_conditioning else neg_prompt,
+            negative=None if zero_conditioning or model_family == "MiniMax H3 Image" else neg_prompt,
             positive_input=positive_text,
             zero_conditioning=bool(zero_conditioning),
             pid_prompt=pid_text if pid_text is not None and pid_text != prompt else None,

@@ -5,7 +5,16 @@ const NODE = "UltraImageEditorPiD";
 const CAP = {
   "Qwen Image Edit 2511": 3,
   "Qwen Image 2.1": 10,
+  "MiniMax H3 Image": 16,
 };
+const MAX_IMAGE_INPUTS = Math.max(...Object.values(CAP));
+const LEGACY_RESOLUTIONS = ["auto_1mp", "0.5MP", "1.5MP", "2MP", "original", "custom"];
+const MINIMAX_RESOLUTIONS = ["4MP", "8MP", "16MP", "original", "custom"];
+const ALL_RESOLUTIONS = [...new Set([...LEGACY_RESOLUTIONS, ...MINIMAX_RESOLUTIONS])];
+const MINIMAX_FAMILY = "MiniMax H3 Image";
+// Recommend the official lighter variant on FIRST USE only. A saved selection
+// (or a currently edited model profile) always has priority over this hint.
+const MINIMAX_FIRST_USE_PREFERRED = /int8[_-]?convrot/i;
 const PID_DETAILS = ["pid_model", "pid_sampler", "pid_scheduler", "pid_steps", "pid_scale", "pid_color_match"];
 const WIDGET_SCHEMA_VERSION = 1;
 const WIDGET_SCHEMA_PROPERTY = "ultraEditorWidgetSchema";
@@ -13,12 +22,13 @@ const PROFILE_FIELDS = ["diffusion_model", "text_encoder", "vae_name", "steps", 
 const SUGGESTIONS = {
   "Qwen Image Edit 2511": { diffusion_model: /qwen.*edit|qedit|rapid.?aio/i, text_encoder: /qwen[_-]?2[._-]?5.*vl/i, vae_name: /(?:^|[\/])qwen[_-]?image[_-]?vae(?:$|[_.-])/i, steps: 20, cfg: 4, scheduler: "simple", zero_conditioning: false },
   "Qwen Image 2.1": { diffusion_model: /qwen.*(?:2[._-]?1|21)/i, text_encoder: /qwen.*3.*vl/i, vae_name: /qwen.*2[._-]?1.*vae/i, steps: 25, cfg: 1, scheduler: "simple", zero_conditioning: false },
+  "MiniMax H3 Image": { diffusion_model: /minimax.*h3.*image/i, text_encoder: /qwen3[._-]?vl.*minimax[._-]?h3/i, vae_name: /minimax[._-]?h3[._-]?image.*vae/i, steps: 6, cfg: 1, sampler_name: "euler", scheduler: "simple", zero_conditioning: true },
 };
 
 const widget = (node, name) => (node.widgets || []).find(w => w.name === name);
 const model = node => String(widget(node, "model_family")?.value || "Qwen Image Edit 2511");
 const limit = node => CAP[model(node)] || 1;
-const imageIndex = name => /^image([1-9]|10)$/.test(String(name || "")) ? Number(name.slice(5)) : 0;
+const imageIndex = name => /^image(?:[1-9]|1[0-6])$/.test(String(name || "")) ? Number(name.slice(5)) : 0;
 const connected = node => (node.inputs || []).filter(s => imageIndex(s.name) && s.link != null).map(s => imageIndex(s.name)).sort((a,b) => a-b);
 const slotByName = (node, name) => (node.inputs || []).find(s => s.name === name);
 const options = w => {
@@ -39,10 +49,12 @@ function isKnownWrongModel(family, filename) {
   const name = basename(filename).toLowerCase();
   const is21 = /qwen(?:[_ .-]*image)?[_ .-]*(?:2[._-]?1|21)(?![0-9])/.test(name);
   const is2511 = /qwen.*(?:edit.*2511|2511.*edit)|qedit.*2511/.test(name);
+  const isH3 = /minimax.*h3.*image/.test(name);
   const foreign = /(?:^|[_ .-])(?:flux(?:1|2)?|sdxl|hunyuan|wan2?[._-]?\d*|z[_-]?image)(?:[_ .-]|$)/.test(name);
   const t2i2512 = /qwen[_ .-]*image[_ .-]*2512(?![0-9])/.test(name) && !name.includes("edit");
-  return foreign || t2i2512 || (family === "Qwen Image Edit 2511" && is21)
-    || (family === "Qwen Image 2.1" && is2511);
+  return foreign || t2i2512 || (family === "Qwen Image Edit 2511" && (is21 || isH3))
+    || (family === "Qwen Image 2.1" && (is2511 || isH3))
+    || (family === MINIMAX_FAMILY && !isH3);
 }
 function familyAssetMatch(family, field, value) {
   const file = basename(value);
@@ -52,12 +64,13 @@ function familyAssetMatch(family, field, value) {
     return pattern?.test(file) && !isKnownWrongModel(family, file);
   }
   if (field === "text_encoder") {
-    return SUGGESTIONS[family]?.text_encoder?.test(file);
+    return SUGGESTIONS[family]?.text_encoder?.test(file)
+      && (family === MINIMAX_FAMILY || !/minimax/i.test(file));
   }
   if (field === "vae_name") {
     const candidate = SUGGESTIONS[family]?.vae_name?.test(file);
-    return Boolean(candidate) && !(family === "Qwen Image Edit 2511"
-      && /qwen.*(?:2[._-]?1|21).*vae/i.test(file));
+    return Boolean(candidate) && (family === MINIMAX_FAMILY || !/minimax/i.test(file))
+      && !(family === "Qwen Image Edit 2511" && /qwen.*(?:2[._-]?1|21).*vae/i.test(file));
   }
   return false;
 }
@@ -77,7 +90,10 @@ function selectSafeAssets(node, family) {
   for (const field of REQUIRED_ASSET_FIELDS) {
     const w = widget(node, field);
     if (!w) continue;
-    const selected = options(w).find(value => familyAssetMatch(family, field, value));
+    const matching = options(w).filter(value => familyAssetMatch(family, field, value));
+    const selected = (family === MINIMAX_FAMILY && field !== "vae_name"
+      ? matching.find(value => MINIMAX_FIRST_USE_PREFERRED.test(basename(value)))
+      : undefined) ?? matching[0];
     // Deliberate invalid sentinel: the backend refuses it before loading any
     // weights. Keep it in this widget's option list so the user gets a clear
     // missing-model choice, not a separate "value not in list" schema error.
@@ -108,6 +124,7 @@ function applyModelDefaults(node, family, diffusionModel = widget(node, "diffusi
   const preset = SUGGESTIONS[family] || {};
   if (Object.prototype.hasOwnProperty.call(preset, "steps")) setValue(node, "steps", preset.steps);
   if (Object.prototype.hasOwnProperty.call(preset, "cfg")) setValue(node, "cfg", preset.cfg);
+  if (Object.prototype.hasOwnProperty.call(preset, "sampler_name")) setValue(node, "sampler_name", preset.sampler_name);
   if (Object.prototype.hasOwnProperty.call(preset, "scheduler")) setValue(node, "scheduler", preset.scheduler);
   if (Object.prototype.hasOwnProperty.call(preset, "zero_conditioning")) setValue(node, "zero_conditioning", preset.zero_conditioning);
   if (family === "Qwen Image 2.1" && isTurboModel(diffusionModel)) {
@@ -213,7 +230,7 @@ function applyFamilyPreset(node, family) {
   selectSafeAssets(node, family);
   applyModelDefaults(node, family, widget(node, "diffusion_model")?.value);
   setValue(node, "pid_upscale", false);
-  setValue(node, "reuse_assets", true);
+  setValue(node, "reuse_assets", family !== MINIMAX_FAMILY);
   replaceLoras(node, []);
 }
 function restore(node, family) {
@@ -237,19 +254,54 @@ function visible(w, show) {
   w.hidden = !show;
   w.disabled = !show;
 }
+function syncFamilyResolutions(node) {
+  const family = model(node);
+  const w = widget(node, "resolution_mode");
+  if (!w) return;
+  const allowed = family === MINIMAX_FAMILY ? MINIMAX_RESOLUTIONS : LEGACY_RESOLUTIONS;
+  w.options ||= {};
+  w.options.values = [...allowed];
+  if (!allowed.includes(w.value)) {
+    w.value = family === MINIMAX_FAMILY ? "4MP" : "auto_1mp";
+  }
+}
 function syncNativeWidgets(node) {
   const family = model(node);
+  if (!app.configuringGraph && !node.__ultraEditorLoading) syncFamilyResolutions(node);
+  const minimax = family === MINIMAX_FAMILY;
+  const fixed = { steps: 6, cfg: 1, sampler_name: "euler", scheduler: "simple", zero_conditioning: true, reuse_assets: false };
+  for (const [name, value] of Object.entries(fixed)) {
+    const w = widget(node, name);
+    if (!w) continue;
+    if (minimax) w.value = value;
+    w.disabled = minimax;
+  }
+  const negative = widget(node, "negative_text");
+  if (negative) negative.disabled = minimax;
   const mode = String(widget(node, "resolution_mode")?.value || "auto_1mp");
   const manual = mode === "custom";
+  // Match each backend family's native canvas grid and dimension ceiling.
+  // Do not round existing values here: workflow/custom-size data belongs to
+  // the user and remains intact across a model-family switch.
+  for (const name of ["width", "height"]) {
+    const w = widget(node, name);
+    if (!w) continue;
+    w.options ||= {};
+    // Current ComfyUI number widgets use step2; the legacy step is 10x.
+    const sizeStep = minimax ? 32 : 16;
+    w.options.step2 = sizeStep;
+    w.options.step = sizeStep * 10;
+    w.options.max = minimax ? 16384 : 8192;
+  }
   visible(widget(node, "width"), manual);
   visible(widget(node, "height"), manual);
   const pid = widget(node, "pid_upscale");
   if (pid) {
-    const unsupported = family === "Qwen Image 2.1";
+    const unsupported = family !== "Qwen Image Edit 2511";
     if (unsupported) pid.value = false;
     pid.disabled = unsupported;
   }
-  const show = Boolean(pid?.value) && family !== "Qwen Image 2.1";
+  const show = Boolean(pid?.value) && family === "Qwen Image Edit 2511";
   for (const field of PID_DETAILS) visible(widget(node, field), show);
   visible(widget(node, "pid_prompt"), show);
   const target = widget(node, "edit_target");
@@ -290,20 +342,20 @@ function installInitialPromptHeight(nodeType) {
     },
   });
 }
-// Node geometry belongs to the ComfyUI core. The backend still accepts
-// image1..image10, but the frontend definition exposes only image1 so the core
-// never builds 10 sockets at creation/load. Otherwise the core's post-load
+// Node geometry belongs to the ComfyUI core. The backend accepts up to
+// image16, but the frontend exposes only image1 so the core does not
+// build 16 sockets at creation/load. Otherwise the core's post-load
 // minimum-size check (max(saved size, computeSize)) counts 9 temporary empty
 // sockets and overrides the user's saved node size. Extra sockets are added
 // with the core addInput() API only when images are connected.
 function exposeOnlyFirstImageSocket(nodeData) {
   const optional = nodeData?.input?.optional;
   if (optional && typeof optional === "object") {
-    for (let i = 2; i <= 10; i++) delete optional[`image${i}`];
+    for (let i = 2; i <= MAX_IMAGE_INPUTS; i++) delete optional[`image${i}`];
   }
   const order = nodeData?.input_order?.optional;
   if (Array.isArray(order)) {
-    nodeData.input_order.optional = order.filter(name => !/^image(?:[2-9]|10)$/.test(String(name)));
+    nodeData.input_order.optional = order.filter(name => !/^image(?:[2-9]|1[0-6])$/.test(String(name)));
   }
 }
 
@@ -320,13 +372,13 @@ function syncImageSlots(node) {
     node.__ultraEditorGapNotice = null;
   }
   const highest = Math.max(0, ...links);
-  const desired = Math.min(10, Math.max(1, highest + (highest < limit(node) ? 1 : 0)));
+  const desired = Math.min(limit(node), Math.max(1, highest + (highest < limit(node) ? 1 : 0)));
   for (let i = 1; i <= desired; i++) {
     if (!slotByName(node, `image${i}`)) {
       node.addInput(`image${i}`, "IMAGE");
     }
   }
-  for (let i = 10; i > desired; i--) {
+  for (let i = MAX_IMAGE_INPUTS; i > desired; i--) {
     const at = (node.inputs || []).findIndex(s => s.name === `image${i}`);
     if (at >= 0 && node.inputs[at].link == null) {
       node.removeInput(at);
@@ -389,8 +441,8 @@ const WIDGET_LABELS = {
 // Tooltip-only text is localized without changing the canonical underlying
 // widget name, serialized option value, model file or seed operation token.
 const WIDGET_TOOLTIPS = {
-  model_family: ["Choose the Qwen editing model family. 2511 supports up to 3 images and optional PiD; 2.1 supports up to 10 images.",
-                 "Qwen 편집 모델 계열을 선택합니다. 2511은 최대 3장과 PiD를 지원하며 2.1은 최대 10장까지 지원합니다."],
+  model_family: ["Choose the editing model family. Qwen 2511 supports 3 images and optional PiD; Qwen 2.1 supports 10; MiniMax H3 Image supports 16 and native ~16MP output (PiD off).",
+                 "편집 모델 계열을 선택합니다. Qwen 2511은 최대 3장과 PiD, Qwen 2.1은 10장, MiniMax H3 Image는 16장과 네이티브 약 16MP(PiD OFF)를 지원합니다."],
   diffusion_model: ["Select a compatible diffusion model for this Qwen family.",
                     "선택한 Qwen 계열과 호환되는 확산 모델 파일을 선택하세요."],
   text_encoder: ["Select the matching Qwen VL text encoder for the selected family.",
@@ -399,10 +451,10 @@ const WIDGET_TOOLTIPS = {
              "Qwen 모델 계열에 맞는 VAE를 선택하세요."],
   positive_text: ["Describe the requested image edit. Numbered image references follow the original IMAGE sockets.",
                   "원하는 이미지 편집 지시를 입력하세요. 이미지 번호는 원래 IMAGE 입력 단자 번호를 기준으로 작성합니다."],
-  width: ["Custom resolution only. Use 0 to derive the width from the selected target image aspect ratio.",
-          "사용자 지정 해상도에서만 사용합니다. 0은 수정 대상 이미지의 비율에 맞춰 가로 길이를 계산합니다."],
-  height: ["Custom resolution only. Use 0 to derive the height from the selected target image aspect ratio.",
-           "사용자 지정 해상도에서만 사용합니다. 0은 수정 대상 이미지의 비율에 맞춰 세로 길이를 계산합니다."],
+  width: ["Custom resolution only. 0 derives the width from the edit target aspect ratio; with both dimensions 0, H3 uses ~4MP.",
+          "사용자 지정 해상도에서만 사용합니다. 0이면 수정 대상의 비율로 가로를 계산하고, H3에서 가로·세로 모두 0이면 약 4MP를 사용합니다."],
+  height: ["Custom resolution only. 0 derives the height from the edit target aspect ratio; with both dimensions 0, H3 uses ~4MP.",
+           "사용자 지정 해상도에서만 사용합니다. 0이면 수정 대상의 비율로 세로를 계산하고, H3에서 가로·세로 모두 0이면 약 4MP를 사용합니다."],
   seed: ["Random seed for image editing and optional PiD.", "이미지 편집과 PiD에서 사용하는 시드입니다."],
   control_after_generate: ["Choose whether the seed stays fixed or changes after generating.",
                            "생성 후 시드를 고정할지 자동 변경할지 선택합니다."],
@@ -454,19 +506,24 @@ function localizeNode(node) {
   const family = model(node);
   const mode = String(widget(node, "resolution_mode")?.value || "auto_1mp");
   const res = widget(node, "resolution_mode");
-  if (res) res.tooltip = family === "Qwen Image Edit 2511" && mode === "original"
+  if (res) res.tooltip = family === MINIMAX_FAMILY
+    ? tr("MiniMax H3 Image: 4MP default, 8MP / 16MP, Original, or Custom. MP presets use area resize and 32px cover-crop; 16MP snaps to an exact native canvas when the source aspect matches within 3%. Custom preserves the complete source with padding.",
+         "MiniMax H3 Image: 기본 4MP, 8MP·16MP, 원본, 사용자 지정. MP 모드는 area 리사이즈와 32배수 중앙 cover-crop을 적용합니다. 16MP는 비율 차이 3% 이내라면 네이티브 규격에 정확히 맞춥니다. 사용자 지정은 패딩으로 원본을 보존합니다.")
+    : family === "Qwen Image Edit 2511" && mode === "original"
     ? tr("Qwen Edit 2511 is best used at Auto ~1MP: its official reference encoder uses ~1MP latents. Original size may alter composition and use much more VRAM.",
          "Qwen Edit 2511은 자동 약 1MP를 권장합니다. 공식 참조 인코더는 약 1MP latent를 사용하므로 원본 크기로 출력하면 구도가 변하거나 VRAM이 크게 늘 수 있습니다.")
     : tr("Preserves edit target aspect ratio. Auto ~1MP, 0.5/1.5/2MP, Original, or Custom. Original in Qwen 2.1 keeps the edit target native but limits other references to ~1MP. PiD x4 depends on the longest side.",
          "수정 대상의 비율 유지. 자동 약 1MP, 0.5/1.5/2MP, 원본 크기, 사용자 지정. Qwen 2.1 원본 모드는 대상만 원본 크기로 유지하고 나머지 참조는 약 1MP로 제한합니다. PiD x4 제한은 긴 변 기준입니다.");
   const pid = widget(node, "pid_upscale");
-  if (pid) pid.tooltip = family === "Qwen Image 2.1"
-    ? tr("No native compatible PiD checkpoint for Qwen 2.1.", "Qwen 2.1에는 호환되는 네이티브 PiD 체크포인트가 없습니다.")
+  if (pid) pid.tooltip = family !== "Qwen Image Edit 2511"
+    ? tr(`No native compatible PiD checkpoint for ${family}.`, `${family}에는 호환되는 네이티브 PiD 체크포인트가 없습니다.`)
     : tr("Upscale edited latent with a compatible PiD checkpoint.", "호환 PiD 모델을 사용해 편집된 latent를 확대합니다.");
   const turbo = family === "Qwen Image 2.1" && isTurboModel(widget(node, "diffusion_model")?.value);
   const turboManual = turbo && Number(widget(node, "steps")?.value || 0) === 8;
   const steps = widget(node, "steps");
-  if (steps) steps.tooltip = turbo
+  if (steps) steps.tooltip = family === MINIMAX_FAMILY
+    ? tr("MiniMax H3 Image uses exactly 6 distilled steps.", "MiniMax H3 Image는 증류된 6스텝으로 고정됩니다.")
+    : turbo
     ? (turboManual
         ? tr("Qwen 2.1 Turbo uses its built-in 8-step sigma schedule when Steps = 8. Change the step count to use normal KSampler stepping.",
              "Qwen 2.1 Turbo는 Steps=8일 때 내장 8스텝 시그마 스케줄을 사용합니다. 다른 스텝 수를 입력하면 일반 KSampler 스텝을 사용합니다.")
@@ -474,7 +531,9 @@ function localizeNode(node) {
              "Qwen 2.1 Turbo는 Steps가 8이 아니므로 일반 KSampler 스텝을 사용합니다."))
     : tr("Sampler steps", "샘플링 스텝");
   const cfg = widget(node, "cfg");
-  if (cfg) cfg.tooltip = turbo
+  if (cfg) cfg.tooltip = family === MINIMAX_FAMILY
+    ? tr("MiniMax H3 Image uses fixed CFG 1.0.", "MiniMax H3 Image의 CFG는 1.0으로 고정됩니다.")
+    : turbo
     ? tr("Qwen 2.1 Turbo keeps CFG editable. The common starting value is 1.0.",
          "Qwen 2.1 Turbo에서도 CFG를 직접 조절할 수 있습니다. 일반적인 시작값은 1.0입니다.")
     : tr("Classifier-free guidance (CFG)", "분류기 없는 유도 강도(CFG)");
@@ -484,7 +543,9 @@ function localizeNode(node) {
          "Turbo에서 Steps=8이면 내장 시그마 스케줄을 사용하므로 Scheduler 값은 적용되지 않습니다.")
     : tr("Scheduler", "스케줄러");
   const negative = widget(node, "negative_text");
-  if (negative) negative.tooltip = family === "Qwen Image 2.1"
+  if (negative) negative.tooltip = family === MINIMAX_FAMILY
+      ? tr("MiniMax H3 Image does not use a negative prompt; its content is preserved for other families.", "MiniMax H3 Image는 부정 프롬프트를 사용하지 않습니다. 다른 모델을 위해 내용은 보존됩니다.")
+      : family === "Qwen Image 2.1"
       ? tr("At CFG=1 negative text has no effective guidance. Increase CFG above 1 to strengthen it.", "CFG=1에서는 부정 프롬프트의 유도 효과가 거의 없으며 CFG를 1보다 높이면 강화됩니다.")
       : tr("Negative editing prompt", "부정 편집 프롬프트");
   const target = widget(node, "edit_target");
@@ -895,8 +956,10 @@ function isCurrentWidgetLayout(standardWidgets, saved, properties) {
   const isNumber = name => byName[name] == null || (typeof byName[name] === "number" && Number.isFinite(byName[name]));
   const isBool = name => byName[name] == null || typeof byName[name] === "boolean";
   if (!oneOf("model_family", Object.keys(CAP))) return false;
-  if (!oneOf("edit_target", ["auto", ...Array.from({length:10}, (_, i) => `image${i + 1}`)])) return false;
-  if (!oneOf("resolution_mode", ["auto_1mp", "0.5MP", "1.5MP", "2MP", "original", "custom"])) return false;
+  if (!oneOf("edit_target", ["auto", ...Array.from({length:MAX_IMAGE_INPUTS}, (_, i) => `image${i + 1}`)])) return false;
+  const allowedResolutions = [...new Set([...ALL_RESOLUTIONS,
+    ...options(standardWidgets.find(w => w.name === "resolution_mode"))])];
+  if (!oneOf("resolution_mode", allowedResolutions)) return false;
   if (!oneOf("pid_scale", ["x2", "x4"])) return false;
   for (const name of ["positive_text", "negative_text", "pid_prompt", "diffusion_model", "text_encoder", "vae_name", "sampler_name", "scheduler", "pid_model", "pid_sampler", "pid_scheduler"]) {
     if (!isText(name)) return false;
@@ -920,10 +983,24 @@ function attachHooks(node) {
     familyWidget.callback = function(value, ...args) {
       const next = String(value || familyWidget.value || "");
       const oldFamily = node.__ultraEditorCurrentFamily || model(node);
-      const highest = Math.max(0, ...connected(node));
-      if (highest > (CAP[next] || 1)) {
+      const cap = CAP[next] || 1;
+      const excess = connected(node).filter(index => index > cap);
+      if (excess.length) {
+        // Preserve every link. For non-contiguous sockets, list the exact
+        // inputs instead of misleadingly showing an inclusive range.
         familyWidget.value = oldFamily;
-        nonblockingNotice(`${next}: at most ${CAP[next]} images; disconnect image${highest} first.`, `${next}: 최대 ${CAP[next]}장입니다. image${highest} 연결을 먼저 해제하세요.`);
+        const contiguous = excess.every((index, i) => i === 0 || index === excess[i - 1] + 1);
+        const names = contiguous && excess.length > 1
+          ? `image${excess[0]}~image${excess[excess.length - 1]}`
+          : excess.map(index => `image${index}`).join(", ");
+        const target = String(widget(node, "edit_target")?.value || "auto");
+        const targetAffected = excess.includes(imageIndex(target));
+        nonblockingNotice(
+          `${next}: at most ${cap} images. Manually disconnect ${names} (${excess.length} links) before switching.`
+            + (targetAffected ? ` The edit target ${target} is included.` : ""),
+          `${next}: 최대 ${cap}장입니다. 모델 변경 전 ${names} 연결(${excess.length}개)을 직접 해제하세요.`
+            + (targetAffected ? ` 수정 대상 ${target}도 포함됩니다.` : ""),
+        );
         schedule(node);
         return;
       }
@@ -931,9 +1008,17 @@ function attachHooks(node) {
         captureCurrentDraft(node);
         node.__ultraEditorDraftLastModelByFamily ||= Object.create(null);
         node.__ultraEditorDraftLastModelByFamily[oldFamily] = node.__ultraEditorCurrentDiffusion;
+        node.__ultraEditorResolutionByFamily ||= Object.create(null);
+        node.__ultraEditorResolutionByFamily[oldFamily] = widget(node, "resolution_mode")?.value;
       }
       const ret = callback?.call(this, next, ...args);
       if (next !== oldFamily) restore(node, next);
+      if (next !== oldFamily) {
+        syncFamilyResolutions(node);
+        const wanted = node.__ultraEditorResolutionByFamily?.[next]
+          || (next === MINIMAX_FAMILY ? "4MP" : "auto_1mp");
+        setValue(node, "resolution_mode", wanted);
+      }
       trackActiveProfile(node);
       syncNativeWidgets(node);
       schedule(node);

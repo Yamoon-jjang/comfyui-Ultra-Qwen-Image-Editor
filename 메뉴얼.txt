@@ -1,15 +1,18 @@
 ﻿Ultra Qwen Image Editor + PiD
-정식 사용 설명서 v1.0.4
+정식 사용 설명서 v1.0.5
 ============================================================
 
 1. 제품 개요
 ------------------------------------------------------------
 Ultra Qwen Image Editor + PiD는 ComfyUI 안에서 사진이나 참조 이미지를
-불러오고 자연어 편집 지시로 수정하는 Qwen 전용 커스텀 노드입니다.
+불러오고 자연어 편집 지시로 수정하는 다중 계열 커스텀 노드입니다.
 
 지원 모델 계열
   - Qwen Image Edit 2511: 참조 이미지 최대 3장, 선택적 PiD 업스케일
   - Qwen Image 2.1: 참조 이미지 최대 10장, 일반 및 Turbo 체크포인트
+  - MiniMax H3 Image: 참조 이미지 최대 16장, 전용 H3 컨디셔닝
+
+이 버전은 GitHub에 릴리즈하지 않은 사용자 GPU 검증 전 후보입니다.
 
 모델 계열에 따라 필요한 확산 모델, 텍스트 인코더, VAE가 다릅니다.
 다른 용도의 이미지 생성 전용 체크포인트는 편집 모델을 대신할 수 없습니다.
@@ -37,8 +40,9 @@ Ultra Qwen Image Editor + PiD는 ComfyUI 안에서 사진이나 참조 이미지
     'Ultra Qwen Image Editor + PiD'를 찾아 배치합니다.
 
 이 노드는 별도의 pip 패키지를 추가 설치하지 않습니다.
-최신 ComfyUI 코어에 TextEncodeQwenImageEditPlus 및
-TextEncodeQwenImage21, KSampler 등의 실행 기능이 있어야 합니다.
+최신 ComfyUI 코어에 TextEncodeQwenImageEditPlus,
+TextEncodeQwenImage21, MiniMaxH3ImageConditioning, KSampler 등의
+실행 기능이 있어야 합니다.
 PiD 업스케일에는 ComfyUI 코어의 PiD 관련 노드 및 Gemma 2 ELM,
 호환되는 QwenImage PiD 체크포인트가 추가로 필요합니다.
 
@@ -57,8 +61,14 @@ Qwen Image Edit 2511
 
 Qwen Image 2.1
   확산 모델 : Qwen Image 2.1 Base 또는 Turbo 호환 파일
-  인코더    : Qwen3 VL 호환 파일
+  인코더    : Qwen3 VL 호환 파일 (MiniMax H3 전용 인코더 제외)
   VAE       : Qwen Image 2.1 전용 VAE
+
+MiniMax H3 Image
+  확산 모델 : minimax_h3_image_pruned_int8_convrot.safetensors
+  인코더    : qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+  VAE       : minimax_h3_image_vae_fp16.safetensors
+  경로      : models/diffusion_models / models/text_encoders / models/vae
 
 실제 파일명은 배포처와 정밀도(BF16/FP8)에 따라 다를 수 있습니다.
 잘못된 계열 이름이 명백한 모델은 로드 전에 차단하지만, 파일명이
@@ -84,10 +94,17 @@ Qwen Image 2.1
 5. 다중 이미지 연결과 수정 대상
 ------------------------------------------------------------
 처음에는 image1만 표시되며, 연결하면 다음 빈 이미지 단자가 생깁니다.
-Qwen 2511은 최대 3장, Qwen 2.1은 최대 10장까지 연결 가능합니다.
+Qwen 2511은 최대 3장, Qwen 2.1은 최대 10장,
+MiniMax H3 Image는 최대 16장까지 연결 가능합니다.
 image1 → image2 → image3처럼 번호를 건너뛰지 않고 연결하세요.
 이미지 단자를 중간에서 분리해도 기존 연결선과 번호를 마음대로
 재배치하지 않습니다. 중간 번호가 비면 실행 전 알림이 나옵니다.
+
+모델 변경 시 상한보다 높은 이미지 단자에 연결선이 남아 있다면
+모델 변경을 취소하고 경고합니다. 예를 들어 MiniMax의 image16까지
+연결한 후 2511을 선택해도 이미지 연결은 자동 해제되지 않습니다.
+사용자가 직접 image4~image16의 연결을 확인·해제한 후 바꾸세요.
+원하지 않는 참조가 삭제되는 일이 없도록 자동 정리를 금지합니다.
 
 Edit Target
   auto   : image1을 수정 대상 이미지로 사용
@@ -136,6 +153,26 @@ Qwen 2511은 내부 해상도를 16의 배수, Qwen 2.1은 32의 배수로
 수정 대상이 아닌 다른 참조 사진은 과도한 인코딩 부하를 막기 위해
 약 1MP 이내로 조정될 수 있습니다.
 
+MiniMax H3 Image: 4MP(기본), 8MP, 16MP, original, custom.
+MP 모드에서는 공식 방식으로 전체 픽셀을 해당 크기로 area 보간하고
+32픽셀 배수로 cover-crop(가장자리 잘라내기)합니다. 단, 16MP에서
+원본 비율이 공식 네이티브 규격과 3% 이내로 가까우면 해당 규격의
+정확한 해상도로 중앙 크롭합니다. 그 외 비율은 기존 area/cover 방식입니다.
+원본 모드는
+32배수 cover-crop만, 사용자 지정은 패딩으로 원본을 모두 보존합니다.
+실제 전처리된 이미지의 가로·세로를 H3 컨디셔닝에 명시 전달하므로
+0/0 입력으로 1MP 크기까지 줄어드는 문제를 피합니다.
+공식 네이티브 약 16MP(4096×4096, 4736×3552, 5024×3360,
+5472×3072, 6272×2688 등)는 PiD 없이 지원됩니다. H3의 한 변
+상한은 코어와 같은 16384px이며 다른 Qwen 계열은 기존 8192px입니다.
+극단적인 이미지 비율로 이 범위를 초과하면 실제 리사이즈 전에
+사전 검사하여 오류를 알립니다. H3 사용자 지정에서 가로와 세로를
+모두 0으로 두면 약 4MP의 비율 유지 캔버스를 사용합니다.
+H3 첫 선택에서는 경량 int8_convrot 모델/인코더가 설치돼 있으면
+BF16보다 먼저 추천합니다. 저장된 모델 선택은 덮어쓰지 않습니다.
+모델 변경 때 이미지가 한도를 초과하면 초과 연결·개수·수정 대상 여부를
+안내하지만 자동 연결 해제는 하지 않습니다.
+
 original 또는 2MP와 같은 큰 크기는 VRAM과 처리 시간이 증가합니다.
 PiD를 함께 사용하려면 내부 x4 해상도의 긴 변이 8192px 이하여야 합니다.
 
@@ -145,6 +182,7 @@ PiD를 함께 사용하려면 내부 x4 해상도의 긴 변이 8192px 이하여
   Qwen Image Edit 2511 : Steps 20 / CFG 4 / KSampler
   Qwen Image 2.1 Base  : Steps 25 / CFG 1 / KSampler
   Qwen Image 2.1 Turbo : Steps 8  / CFG 1
+  MiniMax H3 Image     : Steps 6 / CFG 1 / euler / simple (고정)
 
 Qwen Image 2.1 Turbo에서 파일명에 'turbo'가 포함되고 Steps=8이면
 내장 8구간 ManualSigmas 시그마 스케줄로 샘플링합니다.
@@ -155,6 +193,17 @@ Turbo에서 Steps를 7, 10, 12 등 8 이외의 값으로 변경하면
 일반 KSampler가 선택한 Steps/Sampler/Scheduler/CFG를 사용합니다.
 일반 Qwen 2.1과 Qwen 2511은 Steps 값에 따라 항상 KSampler로
 실행합니다. 사용자가 지정한 Steps·CFG는 모델별로 복원됩니다.
+
+MiniMax H3 Image는 공식 전용 Conditioning이 positive와 5D latent를
+함께 반환하며, Steps 6 / CFG 1 / euler / simple / Zero ON을 고정합니다.
+Negative Prompt와 PiD는 적용하지 않으며 메모리 자산 재사용도 OFF입니다.
+다만 기존 Negative 텍스트와 IMAGE 연결선은 다른 모델용으로 보존합니다.
+이미지 참조는 수정 대상을 <Picture 1>로 앞세워 다시 번호를 매기고
+프롬프트에서도 imageN/이미지N을 <Picture N>으로 변환합니다.
+각 IMAGE 입력은 RGB/RGBA 이미지 1장(배치 1)을 사용해야 합니다.
+전용 H3 LoRA는 MODEL에 적용할 수 있지만 개별 LoRA 호환성은
+체크포인트에 따라 확인해야 합니다. 프롬프트 확장기는 외부 노드에서
+별도로 연결할 수 있으며 이 노드에 내장되어 있지 않습니다.
 
 Zero Conditioning
   OFF : Negative Prompt를 인코딩합니다.
@@ -182,7 +231,7 @@ LoRA 각 행의 기능
 ------------------------------------------------------------
 PiD Upscale을 ON으로 설정하면 편집이 끝난 잠재 공간 결과에 대해
 별도의 QwenImage 호환 PiD 패스를 진행합니다.
-Qwen Image 2.1에서는 PiD 옵션이 비활성화됩니다.
+Qwen Image 2.1과 MiniMax H3에서는 PiD 옵션이 비활성화됩니다.
 
 주요 옵션
   PiD Scene Prompt : 별도 장면 설명 (빈 값은 편집 프롬프트 사용)
@@ -212,6 +261,7 @@ LoRA가 적용된 모델과 샘플링 결과는 캐시하지 않습니다.
 메모리 여유가 부족하거나 모델 파일을 교체한 경우에는
 Reuse Models (RAM)을 OFF로 하고 한 번 실행하면 이 노드가
 보관 중인 RAM 참조를 해제할 수 있습니다.
+MiniMax H3에서는 큰 인코더·모델이 오래 고정되지 않도록 자동 OFF입니다.
 
 11. 모델별 설정 저장 및 워크플로
 ------------------------------------------------------------

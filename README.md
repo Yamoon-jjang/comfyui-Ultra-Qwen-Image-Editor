@@ -1,14 +1,14 @@
-# Ultra Qwen Image Editor + PiD — v1.0.4
+# Ultra Qwen Image Editor + PiD — v1.0.5
 
-**Qwen 전용 ComfyUI 이미지 편집 커스텀 노드 / Native ComfyUI image-editing node for Qwen**
+**Qwen 2511·2.1 + MiniMax H3 Image 통합 편집 / Multi-family native ComfyUI image editor**
 
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 
-이미지를 입력하고 자연어로 편집합니다. **Qwen Image Edit 2511**과 **Qwen Image 2.1(Base/Turbo)**을 지원하며, 여러 장의 참조 이미지를 활용하고 수정할 이미지를 지정할 수 있습니다. LoRA를 적용할 수 있고, **PiD 업스케일은 Qwen 2511에 한해 선택적으로 제공**합니다.
+이미지를 입력하고 자연어로 편집합니다. **Qwen Image Edit 2511**, **Qwen Image 2.1(Base/Turbo)**, **MiniMax H3 Image**를 지원하며, 모델별 입력 한도는 각각 **3·10·16장**입니다. LoRA를 적용할 수 있고, **PiD 업스케일은 Qwen 2511에 한해 선택적으로 제공**합니다.
 
-**English overview:** Ultra Qwen Image Editor + PiD is a native ComfyUI custom node for reference-guided image editing with **Qwen Image Edit 2511** and **Qwen Image 2.1 (Base/Turbo)**. Connect one or more reference images, choose which input should be edited, then describe the changes in Korean or English. The node provides positive/negative prompts, aspect-aware resolution controls, editable sampling steps and CFG, a reorderable multi-LoRA stack, per-model settings recall, and optional asset reuse to reduce repeated loading.
+**English overview:** Ultra Qwen Image Editor + PiD is a native ComfyUI custom node for reference-guided image editing with **Qwen Image Edit 2511**, **Qwen Image 2.1 (Base/Turbo)**, and **MiniMax H3 Image**. Connect reference images, select the edit target, and describe changes in Korean or English. Qwen keeps its existing editable controls, while MiniMax follows its native conditioning path and fixed sampling configuration.
 
-It accepts up to **3 image inputs for Qwen 2511** or **10 for Qwen 2.1**, with dynamically added numbered sockets. English/Korean `imageN` references are remapped to match a changed edit target. For Qwen 2.1 Turbo, **8 steps use the built-in sigma schedule** while other step counts follow the selected KSampler scheduler. Optional **PiD x2/x4 upscaling and color matching are supported only for Qwen 2511**; Qwen 2.1 has no native PiD support in this node. Output images can be connected to ComfyUI's built-in `Save Image` node.
+It accepts up to **3 inputs for Qwen 2511, 10 for Qwen 2.1, or 16 for MiniMax H3**, with dynamically added numbered sockets. If too many images remain linked, switching to a lower-cap family is **refused with a warning**: **the user manually disconnects unwanted inputs; no link is deleted automatically**. English/Korean `imageN` references are renumbered for the chosen edit target and, for H3, converted to `<Picture N>`. Qwen 2.1 Turbo's **8-step built-in sigma** behavior remains unchanged. Optional **PiD x2/x4 and color matching are available only for Qwen 2511**. Connect outputs to `Save Image`.
 
 
 ## 실제 편집 예시 / Image editing workflow
@@ -25,7 +25,7 @@ It accepts up to **3 image inputs for Qwen 2511** or **10 for Qwen 2.1**, with d
 
 **권장 사용 순서 / Suggested steps:** 선택기에서 1~3장 이미지와 프리셋 선택 → 영어 프롬프트 복사 → 본 노드에 동일한 순서로 이미지 연결 → `Edit Target = image1` 확인 → **Positive Prompt**에 붙여넣기 → 실행. / Select 1–3 images and presets in the Selector → copy the English prompt → connect corresponding images in order → confirm `Edit Target = image1` → paste into **Positive Prompt** → run.
 
-> **참고 / Note:** 선택기는 **최대 3장**의 `image1`–`image3` 역할을 작성합니다. 이 노드 자체는 Qwen 2511에서 최대 **3장**, Qwen 2.1에서 최대 **10장**의 입력을 지원합니다. `Edit Target` 변경 시 이미지 번호 참조가 재매핑될 수 있으므로 출력 문장의 이미지 역할을 확인하세요. / The Selector describes up to **3 images**; this node can accept **3 (2511) or 10 (2.1)**. Check image references if you change the edit target. Pairing is a convenience workflow, not a measured performance or image-quality guarantee.
+> **참고 / Note:** 선택기는 **최대 3장**의 `image1`–`image3` 역할을 작성합니다. 이 노드는 모델에 따라 **3(2511)·10(2.1)·16(MiniMax H3)**장까지 입력을 지원합니다. `Edit Target` 변경 시 이미지 번호 참조가 재매핑됩니다. / The Selector describes up to **3** images; this node supports **3/10/16**. References are renumbered when you change the edit target.
 
 ## 한글·영문 자동 전환 / Automatic Korean & English UI
 
@@ -37,15 +37,15 @@ It accepts up to **3 image inputs for Qwen 2511** or **10 for Qwen 2.1**, with d
 
 | 기능 / Feature | 설명 / Description |
 | --- | --- |
-| 모델 / Models | Qwen Image Edit 2511; Qwen Image 2.1 Base/Turbo |
-| 입력 이미지 / Inputs | 2511: 최대 3장 / up to 3; 2.1: 최대 10장 / up to 10 |
+| 모델 / Models | Qwen Image Edit 2511; Qwen Image 2.1 Base/Turbo; MiniMax H3 Image |
+| 입력 이미지 / Inputs | 2511: 최대 3장 / 3; 2.1: 최대 10장 / 10; MiniMax H3: 최대 16장 / 16 |
 | 수정 대상 / Edit Target | `image1` 또는 연결된 다른 입력 선택 / select a connected image |
 | 프롬프트 / Prompts | 노드 내부 긍정·부정 프롬프트 / built-in positive and negative prompts |
 | 참조 번호 / References | 한·영 이미지 번호 자동 대응 / Korean & English numbered references |
-| 해상도 / Resolution | 약 0.5·1·1.5·2MP, 원본, 사용자 지정 / MP presets, original, custom |
-| 샘플링 / Sampling | Qwen 2.1 Turbo: 정확히 8스텝에서 내장 시그마, 그 외 KSampler |
+| 해상도 / Resolution | Qwen: 약 0.5·1·1.5·2MP; MiniMax H3: 4·8·16MP, 원본, 사용자 지정 / Original and Custom also available |
+| 샘플링 / Sampling | Qwen 2.1 Turbo: 8-step native sigma; MiniMax H3: 6 steps, CFG 1, euler/simple, Zero ON |
 | LoRA | 다중 LoRA·강도·순서·개별 ON/OFF / multiple LoRAs, strengths, ordering |
-| PiD | Qwen 2511 전용 x2/x4 결과 및 선택적 색감 보정 |
+| PiD | Qwen 2511 전용 x2/x4 결과 및 선택적 색감 보정; 2.1/H3는 OFF 잠금 |
 | 언어 / Language | ComfyUI `Comfy.Locale` 기반 한글·영문 UI / KO-EN UI labels and tooltips |
 
 ## 설치 / Installation
@@ -71,13 +71,13 @@ GitHub Releases의 ZIP을 다운로드해 압축을 풀고 `ComfyUI/custom_nodes
 
 **중복 설치 금지 / Avoid duplicate installations:** 예전 폴더 `comfyui-Ultra-Image-Editor` 또는 새 폴더의 다른 복사본이 있으면 ComfyUI를 종료한 상태에서 `custom_nodes` 밖으로 옮기세요. / Move any previous `comfyui-Ultra-Image-Editor` directory or duplicate copies out of `custom_nodes` before starting ComfyUI.
 
-**최초 실행 / First run:** Install compatible Qwen diffusion model, text encoder, and VAE files in their regular ComfyUI model directories. Restart ComfyUI and search for `Ultra Qwen Image Editor + PiD`. Connect `image1` and send `Edited Image` to a `Save Image` node. No extra pip requirements are declared by this custom node.
+**최초 실행 / First run:** Install matching diffusion model, text encoder, and VAE in the normal ComfyUI model directories. Restart ComfyUI and search for `Ultra Qwen Image Editor + PiD`. Connect `image1` and send `Edited Image` to `Save Image`. This node declares no additional pip dependencies.
 
 최근 버전의 ComfyUI 코어와 호환 모델 파일이 필요합니다. 선택적 PiD에는 지원되는 QwenImage PiD 체크포인트와 Gemma 2 ELM 인코더가 별도로 필요합니다. / A recent ComfyUI build with the Qwen edit core nodes is required; optional PiD also needs its compatible checkpoint and Gemma 2 ELM encoder.
 
 ## 빠른 사용 / Quick start
 
-1. `Model Family`에서 **Qwen Image Edit 2511** 또는 **Qwen Image 2.1**을 선택합니다.
+1. `Model Family`에서 **Qwen Image Edit 2511**, **Qwen Image 2.1**, **MiniMax H3 Image** 중 선택합니다.
 2. 계열에 맞는 `Diffusion Model`, `Text Encoder`, `VAE`를 선택합니다.
 3. `image1`에 편집할 이미지를 연결합니다. 이미지가 두 장 이상이면 `Edit Target`을 선택합니다.
 4. 긍정 프롬프트에 편집 지시를 작성합니다. `image1`, `image2`, `이미지1`, `이미지2` 등 **입력 단자 번호**를 사용하세요.
@@ -95,8 +95,26 @@ GitHub Releases의 ZIP을 다운로드해 압축을 풀고 `ComfyUI/custom_nodes
 | Qwen Image Edit 2511 | 20 Steps, CFG 4 | KSampler |
 | Qwen Image 2.1 Base | 25 Steps, CFG 1 | KSampler |
 | Qwen Image 2.1 Turbo | 8 Steps, CFG 1 | **Steps=8:** built-in sigma schedule; **other steps:** KSampler |
+| MiniMax H3 Image | 6 Steps, CFG 1 | euler/simple, Zero ON, PiD OFF; each IMAGE input is a single image |
 
 Turbo의 8스텝 경로에서는 선택한 `Sampler`와 `CFG`가 반영되지만 `Scheduler` 값은 사용되지 않습니다. Turbo에서도 Steps와 CFG를 자유롭게 변경할 수 있습니다. / In Turbo's 8-step mode, CFG and Sampler are active but Scheduler is ignored; other step counts use the chosen KSampler scheduler.
+
+## MiniMax H3 Image — 공식 편집 경로 / Official image-edit path
+
+- 모델 / Diffusion: `minimax_h3_image_pruned_int8_convrot.safetensors` → `models/diffusion_models/`
+- 텍스트 인코더 / Text encoder: `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` → `models/text_encoders/`
+- VAE: `minimax_h3_image_vae_fp16.safetensors` → `models/vae/`
+- 설치 전 최신 ComfyUI의 `MiniMaxH3ImageConditioning`을 사용 가능한지 확인하세요. / Update ComfyUI to a version providing the native MiniMax H3 conditioning node.
+
+**해상도 / Resolution:** 기본 4MP와 8MP는 공식 방식대로 전체 픽셀을 area 보간한 다음 32픽셀 격자에 맞춰 **cover-crop(가장자리 잘라내기)**합니다. 16MP도 같은 방식이지만 원본 비율이 공식 16MP 규격에 3% 이내로 가까우면 정확한 네이티브 크기로 중앙 크롭합니다. `original`은 원본 크기에서 32배수 cover-crop만 합니다. `custom`은 요청한 32배수 캔버스에 패딩해 원본 전체를 보존합니다. 모든 고해상도 크기는 이미지 할당 전에 검증합니다. / Presets use area resize and a 32px cover-crop, except that 16MP snaps to an exact native canvas when within 3% of its aspect ratio. Original only cover-crops; Custom pads to retain the full source. Oversized canvases are rejected before allocation.
+
+**16MP 네이티브 지원 / Native ~16MP:** 공식 4096×4096, 4736×3552, 5024×3360, 5472×3072, 6272×2688 등의 해상도는 PiD 없이 모델이 직접 생성합니다. H3의 가로·세로는 ComfyUI 코어 범위인 최대 16384px로 별도 처리하며, 다른 Qwen 계열은 종전 8192px 제한을 유지합니다. 극단적인 가로세로 비율에서 코어 한도를 넘는 경우에는 실제 리사이즈 전에 경고합니다. H3 `custom`에서 가로·세로가 모두 0이면 약 4MP로 계산합니다. / MiniMax H3 generates native ~16MP (including ComfyUI's listed aspect ratios) without PiD. Only the H3 path uses the native 16384px per-axis bound; legacy Qwen keeps 8192px. Extreme aspect ratios are validated before image allocation. Both Custom dimensions at zero default to ~4MP for H3.
+
+**모델 자동 추천 / Model suggestions:** MiniMax H3를 처음 선택하는 경우 설치된 `int8_convrot` 확산 모델 및 텍스트 인코더를 우선 추천합니다. 이미 저장한 모델별 설정과 사용자가 직접 선택한 파일은 변경하지 않습니다. 이미지 연결 한도를 초과하면 정확한 초과 단자와 개수(수정 대상 포함 여부)를 알리고 모델 전환을 막습니다. 링크 해제는 항상 사용자가 직접 합니다. / First use prefers installed `int8_convrot` assets. Saved model choices are preserved. An over-limit switch warns about all offending connected sockets; the user must manually disconnect them.
+
+**참조와 샘플링 / References & sampling:** `image1`부터 최대 16장까지 순서대로 연결합니다. 수정 대상은 내부에서 `<Picture 1>`이 되고 나머지가 순서대로 재배열됩니다. Steps=6, CFG=1, euler/simple, Zero Conditioning ON은 고정이며, Negative·PiD·자산 재사용은 OFF입니다. 여러 장의 IMAGE 참조를 허용하더라도 각 IMAGE 입력의 배치 크기는 1이어야 합니다. / Up to 16 consecutive sockets; the edit target becomes `<Picture 1>`. Steps=6/CFG=1/euler/simple/Zero ON are fixed; Negative/PiD/RAM asset reuse are disabled. Each IMAGE socket accepts one image, not a batch.
+
+**모델 전환 / Switching models:** 예를 들어 MiniMax에서 `image16`까지 연결하고 2511로 바꾸면 경고가 나타나고 **변경을 취소합니다**. 연결선은 한 개도 자동 삭제하지 않습니다. 사용자가 직접 상한을 넘는 연결을 해제한 뒤 재선택하세요. / Changing from H3 with higher image links to Qwen 2511/2.1 is blocked until **you manually disconnect** the extra links. Nothing is removed automatically.
 
 ## 설정 저장 / Profile persistence
 
