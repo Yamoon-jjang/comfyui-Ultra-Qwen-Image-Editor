@@ -4,7 +4,8 @@
 
 Supports **Qwen Image Edit 2511**, **Qwen Image 2.1 Base/Turbo** and **MiniMax H3 Image** with numbered references, target-image selection, built-in positive/negative prompts, configurable resolution, multi-LoRA support, and per-model settings recall.
 
-### What's new in v1.0.6 / 1.0.6 변경 사항
+### What's new since v1.0.4 / v1.0.4 이후 변경 사항 (v1.0.6)
+- **Supported models / 지원 모델:** Qwen Image Edit 2511 (up to 3 images), Qwen Image 2.1 Base/Turbo (up to 10), and **new: MiniMax H3 Image (up to 16)**. / Qwen Image Edit 2511(최대 3장), Qwen Image 2.1 Base/Turbo(최대 10장), **신규: MiniMax H3 Image(최대 16장)**.
 - **MiniMax H3 Image:** edits through the same graph as the official ComfyUI edit workflow (`image_minimax_h3_image_edit`) — native MiniMax H3 Image Conditioning with the VAE and images, zeroed negative, 6 steps / CFG 1 / euler / simple (locked; no PiD). Up to **16** references; references such as `image2` or `이미지 2` become `<Picture N>`. / ComfyUI 공식 편집 워크플로우와 같은 경로로 실행합니다. 6스텝·CFG 1 고정, 참조 최대 16장, 프롬프트의 이미지 참조는 `<Picture N>`으로 자동 변환됩니다.
 - **Resolution for MiniMax:** 4 MP (default), 8 MP, 16 MP, Original and Custom. Presets follow the official template (area resize, then 32 px centre crop); 16 MP snaps to the official native canvas (4096×4096, 4736×3552, 5024×3360, 5472×3072, 6272×2688, or portrait) when the aspect ratio matches within 3 %. MiniMax canvases may use up to 16384 px per side; Qwen keeps 8192 px. / MiniMax는 4·8·16MP·원본·사용자 지정. 16MP는 비율이 맞으면 공식 네이티브 크기에 정확히 맞춥니다.
 - **Family switch:** when too many images are linked, the switch is refused with a notice naming every link to disconnect (and whether the edit target is among them). Links are never removed automatically. / 이미지가 한도를 넘으면 해제할 단자를 모두 알려 주고 전환을 막습니다. 연결은 자동으로 끊지 않습니다.
