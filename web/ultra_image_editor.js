@@ -12,6 +12,13 @@ const LEGACY_RESOLUTIONS = ["auto_1mp", "0.5MP", "1.5MP", "2MP", "original", "cu
 const MINIMAX_RESOLUTIONS = ["4MP", "8MP", "16MP", "original", "custom"];
 const ALL_RESOLUTIONS = [...new Set([...LEGACY_RESOLUTIONS, ...MINIMAX_RESOLUTIONS])];
 const MINIMAX_FAMILY = "MiniMax H3 Image";
+const MINIMAX_LOCKED_WIDGETS = [
+  "negative_text", "cfg",
+  "zero_conditioning", "pid_upscale", "reuse_assets",
+];
+const MINIMAX_LOCKED_VALUES = {
+  cfg: 1, pid_upscale: false, reuse_assets: false,
+};
 // Recommend the official lighter variant on FIRST USE only. A saved selection
 // (or a currently edited model profile) always has priority over this hint.
 const MINIMAX_FIRST_USE_PREFERRED = /int8[_-]?convrot/i;
@@ -22,7 +29,7 @@ const PROFILE_FIELDS = ["diffusion_model", "text_encoder", "vae_name", "steps", 
 const SUGGESTIONS = {
   "Qwen Image Edit 2511": { diffusion_model: /qwen.*edit|qedit|rapid.?aio/i, text_encoder: /qwen[_-]?2[._-]?5.*vl/i, vae_name: /(?:^|[\/])qwen[_-]?image[_-]?vae(?:$|[_.-])/i, steps: 20, cfg: 4, scheduler: "simple", zero_conditioning: false },
   "Qwen Image 2.1": { diffusion_model: /qwen.*(?:2[._-]?1|21)/i, text_encoder: /qwen.*3.*vl/i, vae_name: /qwen.*2[._-]?1.*vae/i, steps: 25, cfg: 1, scheduler: "simple", zero_conditioning: false },
-  "MiniMax H3 Image": { diffusion_model: /minimax.*h3.*image/i, text_encoder: /qwen3[._-]?vl.*minimax[._-]?h3/i, vae_name: /minimax[._-]?h3[._-]?image.*vae/i, steps: 6, cfg: 1, sampler_name: "euler", scheduler: "simple", zero_conditioning: true },
+  "MiniMax H3 Image": { diffusion_model: /minimax.*h3.*image/i, text_encoder: /qwen3[._-]?vl.*minimax[._-]?h3/i, vae_name: /minimax[._-]?h3[._-]?image.*vae/i, steps: 6, cfg: 1, sampler_name: "euler", scheduler: "simple" },
 };
 
 const widget = (node, name) => (node.widgets || []).find(w => w.name === name);
@@ -269,15 +276,12 @@ function syncNativeWidgets(node) {
   const family = model(node);
   if (!app.configuringGraph && !node.__ultraEditorLoading) syncFamilyResolutions(node);
   const minimax = family === MINIMAX_FAMILY;
-  const fixed = { steps: 6, cfg: 1, sampler_name: "euler", scheduler: "simple", zero_conditioning: true, reuse_assets: false };
-  for (const [name, value] of Object.entries(fixed)) {
-    const w = widget(node, name);
-    if (!w) continue;
-    if (minimax) w.value = value;
-    w.disabled = minimax;
+  // Keep the positional widgets for saved workflows; hide H3-inapplicable
+  // controls only at presentation time and enforce their runtime values.
+  for (const [name, value] of Object.entries(MINIMAX_LOCKED_VALUES)) {
+    if (minimax) setValue(node, name, value);
   }
-  const negative = widget(node, "negative_text");
-  if (negative) negative.disabled = minimax;
+  for (const name of MINIMAX_LOCKED_WIDGETS) visible(widget(node, name), !minimax);
   const mode = String(widget(node, "resolution_mode")?.value || "auto_1mp");
   const manual = mode === "custom";
   // Match each backend family's native canvas grid and dimension ceiling.
@@ -301,6 +305,7 @@ function syncNativeWidgets(node) {
     if (unsupported) pid.value = false;
     pid.disabled = unsupported;
   }
+  if (minimax && pid) pid.hidden = true;
   const show = Boolean(pid?.value) && family === "Qwen Image Edit 2511";
   for (const field of PID_DETAILS) visible(widget(node, field), show);
   visible(widget(node, "pid_prompt"), show);
@@ -504,6 +509,16 @@ function localizeNode(node) {
   // which can change disabled/value state while a workflow is being loaded.
   // Refresh every dynamic tooltip immediately on Comfy.Locale.change.
   const family = model(node);
+  const familySelector = widget(node, "model_family");
+  if (familySelector) {
+    if (!Object.hasOwn(familySelector, "__ultraOriginalFamilyTooltip")) {
+      familySelector.__ultraOriginalFamilyTooltip = familySelector.tooltip;
+    }
+    familySelector.tooltip = family === MINIMAX_FAMILY ? tr(
+      "MiniMax H3 Image editing: Euler/simple/6 uses the official checkpoint PDD grid; other settings are experimental. CFG 1, PiD OFF and asset reuse OFF remain enforced. Real image references use native conditioning without blank-image assistance. User Negative Prompt/Zero Conditioning controls are ignored; internal ConditioningZeroOut(positive) supports CFG++ samplers.",
+      "MiniMax H3 Image 편집: Euler/simple/6은 공식 체크포인트 PDD 격자이고 다른 설정은 실험적입니다. CFG 1·PiD OFF·자산 재사용 OFF는 유지합니다. 실제 이미지 참조에 빈 이미지 보조를 사용하지 않고, 사용자 Negative Prompt/Zero Conditioning 설정은 적용하지 않습니다. CFG++ 샘플러용 내부 ConditioningZeroOut(positive)는 사용합니다.")
+      : familySelector.__ultraOriginalFamilyTooltip;
+  }
   const mode = String(widget(node, "resolution_mode")?.value || "auto_1mp");
   const res = widget(node, "resolution_mode");
   if (res) res.tooltip = family === MINIMAX_FAMILY
@@ -522,7 +537,7 @@ function localizeNode(node) {
   const turboManual = turbo && Number(widget(node, "steps")?.value || 0) === 8;
   const steps = widget(node, "steps");
   if (steps) steps.tooltip = family === MINIMAX_FAMILY
-    ? tr("MiniMax H3 Image uses exactly 6 distilled steps.", "MiniMax H3 Image는 증류된 6스텝으로 고정됩니다.")
+    ? tr("Euler/simple with 6 steps uses checkpoint pdd_sigmas. Other step counts use the native H3 sampler's interpolated grid (experimental).", "Euler/simple 6스텝은 체크포인트 pdd_sigmas를 사용합니다. 다른 스텝 수는 네이티브 H3 샘플러의 보간 격자를 사용하며 실험적입니다.")
     : turbo
     ? (turboManual
         ? tr("Qwen 2.1 Turbo uses its built-in 8-step sigma schedule when Steps = 8. Change the step count to use normal KSampler stepping.",
@@ -532,16 +547,26 @@ function localizeNode(node) {
     : tr("Sampler steps", "샘플링 스텝");
   const cfg = widget(node, "cfg");
   if (cfg) cfg.tooltip = family === MINIMAX_FAMILY
-    ? tr("MiniMax H3 Image uses fixed CFG 1.0.", "MiniMax H3 Image의 CFG는 1.0으로 고정됩니다.")
+    ? tr("Fixed at CFG 1 for H3's distilled PDD path.", "H3의 증류된 PDD 경로에 맞춰 CFG 1로 고정됩니다.")
     : turbo
     ? tr("Qwen 2.1 Turbo keeps CFG editable. The common starting value is 1.0.",
          "Qwen 2.1 Turbo에서도 CFG를 직접 조절할 수 있습니다. 일반적인 시작값은 1.0입니다.")
     : tr("Classifier-free guidance (CFG)", "분류기 없는 유도 강도(CFG)");
+  const sampler = widget(node, "sampler_name");
+  if (sampler) sampler.tooltip = family === MINIMAX_FAMILY
+    ? tr("Euler recommended for official six-step PDD; other samplers are experimental.", "공식 6스텝 PDD는 Euler를 권장하며 다른 샘플러는 실험적입니다.")
+    : tr("Sampler", "샘플러");
   const scheduler = widget(node, "scheduler");
-  if (scheduler) scheduler.tooltip = turboManual
+  if (scheduler) scheduler.tooltip = family === MINIMAX_FAMILY
+    ? tr("simple at 6 steps follows the checkpoint's PDD grid; alternate schedules are experimental.", "6스텝 simple은 체크포인트 PDD 격자를 따르며 다른 스케줄러는 실험적입니다.")
+    : turboManual
     ? tr("When Turbo Steps = 8, the built-in sigma schedule is used and Scheduler is ignored.",
          "Turbo에서 Steps=8이면 내장 시그마 스케줄을 사용하므로 Scheduler 값은 적용되지 않습니다.")
     : tr("Scheduler", "스케줄러");
+  const reuse = widget(node, "reuse_assets");
+  if (reuse && family === MINIMAX_FAMILY) reuse.tooltip = tr(
+    "H3 Image disables cross-run asset caching to avoid retaining its very large model weights in system RAM.",
+    "H3 Image는 대형 모델 가중치가 시스템 RAM에 계속 남지 않도록 실행 간 자산 캐시를 사용하지 않습니다.");
   const negative = widget(node, "negative_text");
   if (negative) negative.tooltip = family === MINIMAX_FAMILY
       ? tr("MiniMax H3 Image does not use a negative prompt; its content is preserved for other families.", "MiniMax H3 Image는 부정 프롬프트를 사용하지 않습니다. 다른 모델을 위해 내용은 보존됩니다.")
@@ -1059,8 +1084,20 @@ function attachHooks(node) {
     const callback = steps.callback;
     steps.callback = function(value, ...args) {
       const ret = callback?.call(this, value, ...args);
-      localizeNode(node); // Tooltip switches between Turbo manual and KSampler.
+      syncNativeWidgets(node); // H3 PDD guidance and Turbo tooltips.
       return ret;
+    };
+  }
+  // Sampling is user-editable for H3 too; keep all three control tooltips
+  // synchronized when loading/switching models and changing a value.
+  for (const name of ["sampler_name", "scheduler"]) {
+    const control = widget(node, name);
+    if (!control) continue;
+    const callback = control.callback;
+    control.callback = function(value, ...args) {
+      const result = callback?.call(this, value, ...args);
+      localizeNode(node);
+      return result;
     };
   }
   const pid = widget(node, "pid_upscale");

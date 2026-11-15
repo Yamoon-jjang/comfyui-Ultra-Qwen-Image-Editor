@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — User Manual v1.0.6
+# Ultra Qwen Image Editor + PiD — User Manual v1.0.7
 
 ## Purpose and supported models
 
@@ -71,7 +71,7 @@ ComfyUI/core implementations may round dimensions to latent-grid multiples (16 f
 
 ### MiniMax H3 image preprocessing
 
-Requires current ComfyUI with `MiniMaxH3ImageConditioning`. H3 uses its own resolution list: **4MP (default), 8MP, 16MP, original, custom**. The MP presets use *area* resize and 32-pixel **cover-crop**, not stretch-to-fit. At 16MP, source images within 3% of an official native aspect are instead center-cropped with ComfyUI's core resize helper to that exact native canvas. Other aspect ratios retain the normal area/cover path. `original` only performs the 32px cover-crop. `custom` is a convenience mode that fits the complete image with padding onto a 32px-aligned canvas. The exact processed width/height are explicitly passed to H3 conditioning, preventing unintended 0/0 dimension fallback. Very high MP settings require substantial memory.
+Requires current ComfyUI with `MiniMaxH3ImageConditioning`. H3 uses its own resolution list: **4MP (default), 8MP, 16MP, original, custom**. The MP presets use *area* resize and 32-pixel **cover-crop**, not stretch-to-fit. At 16MP, source images within 3% of an official native aspect are instead center-cropped with ComfyUI's core resize helper to that exact native canvas. Other aspect ratios retain the normal area/cover path. `original` only performs the 32px cover-crop. `custom` is a convenience mode that fits the complete image with padding onto a 32px-aligned canvas. The exact processed width/height are explicitly passed to H3 conditioning, preventing unintended 0/0 dimension fallback. Very high MP settings require substantial memory. Selected H3 diffusion/text/VAE files are validated before the image is resized.
 
 ComfyUI officially lists native ~16MP H3 output including 4096×4096, 4736×3552, 5024×3360, 5472×3072 and 6272×2688. These are model outputs, not PiD enlargements. The editor validates the projected 32px cover-crop dimensions **before** allocating an enlarged source image; MiniMax H3 uses the native core's 16384px per-axis limit, while the two older Qwen families retain their 8192px limit. In H3 `custom` mode, Width=Height=0 uses approximately 4MP; one zero dimension derives from source aspect ratio.
 
@@ -86,13 +86,13 @@ The target image is internally encoded as `<Picture 1>`; other connected inputs 
 | Qwen Image Edit 2511 | 20 / 4 | KSampler |
 | Qwen Image 2.1 Base | 25 / 1 | KSampler |
 | Qwen Image 2.1 Turbo | 8 / 1 | At exactly 8 steps, built-in ManualSigmas; otherwise KSampler |
-| MiniMax H3 Image | 6 / 1 | Native H3 positive + 5D latent, euler/simple, Zero Conditioning ON |
+| MiniMax H3 Image | 6 / 1 recommended | Native H3 positive + 5D latent; euler/simple recommended; other sampling settings experimental |
 
-For a Turbo filename, **exactly Steps=8** uses the built-in eight-interval sigma schedule, with editable CFG and the selected Sampler. The Scheduler widget is ignored only on that path. Any other Turbo step value runs KSampler with the selected Scheduler. Qwen sampling controls remain editable; MiniMax H3's six-step distilled sampling controls stay locked.
+For a Turbo filename, **exactly Steps=8** uses the built-in eight-interval sigma schedule, with editable CFG and the selected Sampler. The Scheduler widget is ignored only on that path. Any other Turbo step value runs KSampler with the selected Scheduler. Other model families retain editable Steps/Scheduler; MiniMax H3 Image fixes both to 6/`simple`.
 
 `Zero Conditioning = ON` zeroes the negative conditioning; `OFF` encodes the entered Negative Prompt. Negative-prompt guidance can be ineffective at CFG=1.
 
-For MiniMax H3, **Steps/CFG/Sampler/Scheduler/Zero Conditioning** are locked to **6/1/euler/simple/ON** and the Negative Prompt widget is inactive; its text is preserved for other models. The separate RAM model-reuse cache and PiD are OFF for H3. Compatible H3-specific LoRAs can be applied on the model path; compatibility must be checked with the chosen checkpoint. External prompt expansion is optional and not bundled into this custom node.
+For MiniMax H3, the official six-step sigma values are read from the loaded checkpoint's `pdd_sigmas` through ComfyUI's native model sampler. **Steps 6 / Euler / Scheduler `simple`** are recommended defaults, while users may select other steps/samplers/schedulers experimentally. At alternate step counts, the native H3 sampler interpolates the PDD grid; no hard-coded substitute grid is introduced. **CFG 1** remains fixed for H3. User negative text and the Zero Conditioning control are inapplicable and hidden, but an internal `ConditioningZeroOut(positive)` provides a valid unconditional model prediction when a CFG++ sampler requests it even at CFG 1. PiD and RAM asset reuse are forced OFF for H3. The negative text remains stored for other model families, whose behavior remains unchanged. The editor uses vision tokens and reference latents from connected **real** images, never synthetic blank-image tokens. Compatible H3-specific LoRAs can be applied on the model path; compatibility must be checked with the chosen checkpoint. External prompt expansion is optional and not bundled into this custom node.
 
 ## LoRA
 
@@ -109,11 +109,11 @@ The internal x4 processing dimension cannot exceed 8192px on its longest side. P
 
 ## Caching, profiles, and workflow files
 
-`Reuse Models (RAM)` retains unchanged loaded model/encoder/VAE assets within a conservative system RAM budget; it does not enlarge GPU VRAM. Disable it for a run to clear the node's retained references. MiniMax H3 forces this setting OFF to avoid pinning very large H3 assets. PiD may need extra RAM and model files.
+`Reuse Models (RAM)` retains unchanged loaded model/encoder/VAE assets within a conservative system RAM budget; it does not enlarge GPU VRAM. Disable it for a run to clear the node's retained references. MiniMax H3 defaults to OFF because its assets are large, but users may turn it ON at the cost of higher retained RAM. PiD may need extra RAM and model files.
 
 Model-specific profiles include model file selections, sampling settings, Zero Conditioning, PiD settings and LoRAs. They are **committed after successful queue submission**, not after finished image rendering. Edits made before queuing are kept as temporary drafts during model switching in the current editor session. Positive/Negative prompts, PiD scene prompt, edit target, resolution and seed remain the current task's values when models change. Save your ComfyUI workflow separately for persistent storage.
 
-Since v1.0.4 the node records the final positive/negative prompt it actually encoded (after image-reference renumbering) in the saved image metadata under `ultra_generation_prompts`. A prompt that arrives through a link — for example from a translator or LLM node — is therefore kept as the real text, not only as a link. Ultra Exif Reader v4.12+ shows it as the Final CLIP prompt. When ComfyUI reuses a cached result, the previous record is inserted again; a failed record never stops generation.
+The node records the final positive/negative prompt it actually encoded (after image-reference renumbering) in the saved image metadata under `ultra_generation_prompts`. A prompt that arrives through a link — for example from a translator or LLM node — is therefore kept as the real text, not only as a link. Ultra Exif Reader v4.12+ shows it as the Final CLIP prompt. When ComfyUI reuses a cached result, the previous record is inserted again; a failed record never stops generation.
 
 Old workflows with incompatible positional widget layouts may be reset to safe defaults rather than incorrectly shifting text, dimensions or LoRA values. If warned, rebuild the node and save a new workflow. Nested subgraphs support profile saving and label localization, but a selection restricted to an output inside a subgraph may not include editor nodes upstream of the external boundary.
 

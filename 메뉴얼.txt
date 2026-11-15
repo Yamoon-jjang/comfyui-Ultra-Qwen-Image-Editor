@@ -1,5 +1,5 @@
 ﻿Ultra Qwen Image Editor + PiD
-정식 사용 설명서 v1.0.6
+정식 사용 설명서 v1.0.7
 ============================================================
 
 1. 제품 개요
@@ -11,8 +11,6 @@ Ultra Qwen Image Editor + PiD는 ComfyUI 안에서 사진이나 참조 이미지
   - Qwen Image Edit 2511: 참조 이미지 최대 3장, 선택적 PiD 업스케일
   - Qwen Image 2.1: 참조 이미지 최대 10장, 일반 및 Turbo 체크포인트
   - MiniMax H3 Image: 참조 이미지 최대 16장, 전용 H3 컨디셔닝
-
-이 버전은 GitHub에 릴리즈하지 않은 사용자 GPU 검증 전 후보입니다.
 
 모델 계열에 따라 필요한 확산 모델, 텍스트 인코더, VAE가 다릅니다.
 다른 용도의 이미지 생성 전용 체크포인트는 편집 모델을 대신할 수 없습니다.
@@ -168,6 +166,8 @@ MP 모드에서는 공식 방식으로 전체 픽셀을 해당 크기로 area �
 극단적인 이미지 비율로 이 범위를 초과하면 실제 리사이즈 전에
 사전 검사하여 오류를 알립니다. H3 사용자 지정에서 가로와 세로를
 모두 0으로 두면 약 4MP의 비율 유지 캔버스를 사용합니다.
+또한 선택한 H3 확산 모델·텍스트 인코더·VAE의 설치 여부와 계열
+호환성을 대용량 참조 이미지 리사이즈보다 먼저 확인합니다.
 H3 첫 선택에서는 경량 int8_convrot 모델/인코더가 설치돼 있으면
 BF16보다 먼저 추천합니다. 저장된 모델 선택은 덮어쓰지 않습니다.
 모델 변경 때 이미지가 한도를 초과하면 초과 연결·개수·수정 대상 여부를
@@ -182,7 +182,7 @@ PiD를 함께 사용하려면 내부 x4 해상도의 긴 변이 8192px 이하여
   Qwen Image Edit 2511 : Steps 20 / CFG 4 / KSampler
   Qwen Image 2.1 Base  : Steps 25 / CFG 1 / KSampler
   Qwen Image 2.1 Turbo : Steps 8  / CFG 1
-  MiniMax H3 Image     : Steps 6 / CFG 1 / euler / simple (고정)
+  MiniMax H3 Image     : Steps 6 / CFG 1 / euler / simple (최초 권장값)
 
 Qwen Image 2.1 Turbo에서 파일명에 'turbo'가 포함되고 Steps=8이면
 내장 8구간 ManualSigmas 시그마 스케줄로 샘플링합니다.
@@ -195,8 +195,21 @@ Turbo에서 Steps를 7, 10, 12 등 8 이외의 값으로 변경하면
 실행합니다. 사용자가 지정한 Steps·CFG는 모델별로 복원됩니다.
 
 MiniMax H3 Image는 공식 전용 Conditioning이 positive와 5D latent를
-함께 반환하며, Steps 6 / CFG 1 / euler / simple / Zero ON을 고정합니다.
-Negative Prompt와 PiD는 적용하지 않으며 메모리 자산 재사용도 OFF입니다.
+함께 반환합니다. 공식 6스텝 시그마는 선택한 H3 체크포인트 내부의
+pdd_sigmas를 ComfyUI 네이티브 모델 샘플러가 읽어 계산합니다.
+Steps·Sampler·Scheduler는 사용자가 직접 선택할 수 있으며,
+처음 사용하는 경우 Steps 6 / Euler / Scheduler simple을 권장합니다.
+6스텝 Euler/simple이면 체크포인트 공식 PDD 격자를 따릅니다.
+다른 값은 네이티브 H3 샘플러를 통한 실험적 실행이며,
+6이 아닌 스텝 수에서는 PDD 격자를 보간합니다. H3에서 CFG 1만
+고정하고 Negative Prompt, Zero Conditioning, PiD, RAM 자산 재사용은 숨깁니다.
+실제 실행에서도 PiD와 RAM 재사용은 OFF이며, 다른 모델 계열은 각자
+샘플링 설정과 자산 재사용을 변경할 수 있습니다.
+CFG++ 샘플러는 CFG 1에서도 무조건 예측을 사용하므로 H3 내부에서
+positive를 ConditioningZeroOut한 컨디셔닝을 준비합니다. 이는 사용자
+Negative Prompt나 Zero Conditioning 설정을 다시 활성화하는 것이 아닙니다.
+실제 참조 IMAGE 비전 토큰과 참조 latent를 활용하므로,
+H3 편집에는 별도의 빈 이미지 보조 옵션이 필요하지 않습니다.
 다만 기존 Negative 텍스트와 IMAGE 연결선은 다른 모델용으로 보존합니다.
 이미지 참조는 수정 대상을 <Picture 1>로 앞세워 다시 번호를 매기고
 프롬프트에서도 imageN/이미지N을 <Picture N>으로 변환합니다.
@@ -208,8 +221,9 @@ Negative Prompt와 PiD는 적용하지 않으며 메모리 자산 재사용도 O
 Zero Conditioning
   OFF : Negative Prompt를 인코딩합니다.
   ON  : 부정 컨디셔닝을 0으로 만듭니다.
-CFG=1에서는 부정 프롬프트의 유도 효과가 거의 없을 수 있으며,
-CFG를 올리면 결과가 달라질 수 있습니다. 지나친 증가는 주의하세요.
+위 내용은 Zero Conditioning을 변경할 수 있는 Qwen 모델 계열에 한정됩니다.
+MiniMax H3 Image는 사용자가 지정한 Negative Prompt/Zero Conditioning을
+반영하지 않으며, CFG++ 호환용 내부 0 컨디셔닝만 따로 사용합니다.
 
 8. LoRA 추가 및 관리
 ------------------------------------------------------------
@@ -261,7 +275,9 @@ LoRA가 적용된 모델과 샘플링 결과는 캐시하지 않습니다.
 메모리 여유가 부족하거나 모델 파일을 교체한 경우에는
 Reuse Models (RAM)을 OFF로 하고 한 번 실행하면 이 노드가
 보관 중인 RAM 참조를 해제할 수 있습니다.
-MiniMax H3에서는 큰 인코더·모델이 오래 고정되지 않도록 자동 OFF입니다.
+MiniMax H3에서는 큰 인코더·모델에 따른 RAM 부담 때문에 OFF로 내부 고정되며
+옵션도 숨깁니다. 다른 편집 계열에서는 자유롭게 설정합니다.
+사용자가 ON으로 바꿀 수 있지만 시스템 RAM 점유량이 늘 수 있습니다.
 
 11. 모델별 설정 저장 및 워크플로
 ------------------------------------------------------------
@@ -335,7 +351,7 @@ ComfyUI가 출력 이미지에 워크플로 메타데이터를 저장할 수 있
 현재 입력한 편집 프롬프트 등이 그 데이터에 포함될 수 있습니다.
 이미지를 공유하기 전 메타데이터 공개 여부를 확인하세요.
 
-v1.0.4부터는 노드가 실제로 모델에 넣은 최종 긍정/부정 프롬프트를
+노드는 실제로 모델에 넣은 최종 긍정/부정 프롬프트를
 이미지 메타데이터의 "ultra_generation_prompts" 항목에 함께 기록합니다.
 번역기·LLM 노드 등을 거쳐 연결선으로 들어온 프롬프트도
 변환 후의 실제 문장(image1/image2 번호 변환 포함)이 남습니다.

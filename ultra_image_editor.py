@@ -595,7 +595,12 @@ def _cached_loader(kind, folder, filename, call, *, reuse_assets=True):
         return result
 
 
-def _load_model_assets(model_name, encoder_name, vae_name, family=None, reuse_assets=True):
+def _validate_asset_selection(model_name, encoder_name, vae_name, family=None):
+    """Reject unavailable/incompatible files without loading model weights.
+
+    H3 can resize a reference to 16MP; check the three selected files before
+    that potentially large allocation, not just inside the later loaders.
+    """
     for name, field, folder in (
         (model_name, "diffusion model", "diffusion_models"),
         (encoder_name, "text encoder", "text_encoders"),
@@ -605,6 +610,10 @@ def _load_model_assets(model_name, encoder_name, vae_name, family=None, reuse_as
             raise ValueError(f"{field}: 설치된 모델을 정확히 선택하세요: {name}")
     if family is not None:
         _validate_family_files(family, encoder_name, vae_name, model_name)
+
+
+def _load_model_assets(model_name, encoder_name, vae_name, family=None, reuse_assets=True):
+    _validate_asset_selection(model_name, encoder_name, vae_name, family)
     model = _cached_loader("main_model", "diffusion_models", model_name,
         lambda: _core("UNETLoader", unet_name=model_name, weight_dtype="default")[0], reuse_assets=reuse_assets)
     clip = _cached_loader("main_clip", "text_encoders", encoder_name,
@@ -787,8 +796,12 @@ def _family_edit(family, model, model_name, clip, vae, images, order, prompt, ne
             clip=clip, prompt=prompt, width=w, height=h, vae=vae,
             images={f"image_{i + 1}": ref for i, ref in enumerate(refs)},
         )
+        # Standard sampling skips unconditional guidance at CFG 1, but CFG++
+        # samplers explicitly request it. Supply valid zeroed H3 conditioning
+        # instead of an empty list, whose calculated model output would be 0.
+        # The user-provided negative prompt remains unused for H3.
         negative = _zero(positive)
-        sampled = _regular_sample(model, positive, negative, latent, seed, 6, 1.0, "euler", "simple")
+        sampled = _regular_sample(model, positive, negative, latent, seed, steps, cfg, sampler, scheduler)
         image = _core("VAEDecode", vae=vae, samples=sampled)[0]
         return image, sampled, w, h
 
@@ -925,8 +938,16 @@ class UltraImageEditorPiD:
         prompt = _rewrite_prompt(positive_text, connected, ordering)
         neg_prompt = _rewrite_prompt(negative_text, connected, ordering)
         if model_family == "MiniMax H3 Image":
-            if (int(steps), float(cfg), sampler_name, scheduler, bool(zero_conditioning)) != (6, 1.0, "euler", "simple", True):
-                raise ValueError("MiniMax H3 Image는 Steps 6 / CFG 1 / euler / simple / Zero Conditioning ON 고정입니다.")
+            # The checkpoint's pdd_sigmas are read by ComfyUI's specialized
+            # H3 ModelSampling. Six Euler/simple steps are the official path;
+            # alternate user settings use the native sampler experimentally.
+            cfg, reuse_assets = 1.0, False
+            if int(steps) < 1:
+                raise ValueError("MiniMax H3 Image: Steps는 1 이상이어야 합니다.")
+            if not (int(steps) == 6 and sampler_name == "euler" and scheduler == "simple"):
+                print("[Ultra Image Editor] MiniMax H3 Image 실험적 샘플링: "
+                      f"{steps} steps / {sampler_name} / {scheduler}; "
+                      "ComfyUI native H3 checkpoint sigma interpolation 사용")
             prompt = _minimax_picture_references(prompt, len(ordering))
             neg_prompt = ""  # H3 has no effective negative prompt.
         if pid_upscale and PID_SPACE[model_family] is None:
@@ -936,12 +957,15 @@ class UltraImageEditorPiD:
             _pid_clip_name()
         minimax_target = None
         if model_family == "MiniMax H3 Image":
-            # Reject invalid resolution and process the image once, before any
-            # heavyweight model loading. The exact result feeds H3 conditioning.
+            # Fail on missing/wrong H3 model assets before allocating a resized
+            # 4–16MP reference. _load_model_assets repeats this cheap check to
+            # remain safe for all its existing callers and model families.
+            _validate_asset_selection(diffusion_model, text_encoder, vae_name, model_family)
+            # Process the image once, before heavyweight model loading. The
+            # exact result feeds the native H3 conditioning path.
             minimax_target = _minimax_prepare_target(
                 images[f"image{ordering[0]}"], width, height, resolution_mode
             )
-            reuse_assets = False  # Do not pin the huge H3 model / encoder in this node's RAM cache.
         else:
             _dimensions(images[f"image{ordering[0]}"], model_family, width, height, resolution_mode)
         # Reject oversized PiD before allocating any model weights.
@@ -988,7 +1012,7 @@ class UltraImageEditorPiD:
             positive=prompt,
             negative=None if zero_conditioning or model_family == "MiniMax H3 Image" else neg_prompt,
             positive_input=positive_text,
-            zero_conditioning=bool(zero_conditioning),
+            zero_conditioning=False if model_family == "MiniMax H3 Image" else bool(zero_conditioning),
             pid_prompt=pid_text if pid_text is not None and pid_text != prompt else None,
         )
         if not pid_upscale:

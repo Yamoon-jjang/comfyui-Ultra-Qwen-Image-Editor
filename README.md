@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — v1.0.6
+# Ultra Qwen Image Editor + PiD — v1.0.7
 
 **Qwen 2511·2.1 + MiniMax H3 Image 통합 편집 / Multi-family native ComfyUI image editor**
 
@@ -6,7 +6,7 @@
 
 이미지를 입력하고 자연어로 편집합니다. **Qwen Image Edit 2511**, **Qwen Image 2.1(Base/Turbo)**, **MiniMax H3 Image**를 지원하며, 모델별 입력 한도는 각각 **3·10·16장**입니다. LoRA를 적용할 수 있고, **PiD 업스케일은 Qwen 2511에 한해 선택적으로 제공**합니다.
 
-**English overview:** Ultra Qwen Image Editor + PiD is a native ComfyUI custom node for reference-guided image editing with **Qwen Image Edit 2511**, **Qwen Image 2.1 (Base/Turbo)**, and **MiniMax H3 Image**. Connect reference images, select the edit target, and describe changes in Korean or English. Qwen keeps its existing editable controls, while MiniMax follows its native conditioning path and fixed sampling configuration.
+**English overview:** Ultra Qwen Image Editor + PiD is a native ComfyUI custom node for reference-guided image editing with **Qwen Image Edit 2511**, **Qwen Image 2.1 (Base/Turbo)**, and **MiniMax H3 Image**. Connect reference images, select the edit target, and describe changes in Korean or English. MiniMax H3 recommends **Euler/simple/6** for its checkpoint PDD grid while allowing experimental sampler/scheduler/step adjustments; other model families retain their existing sampling paths.
 
 It accepts up to **3 inputs for Qwen 2511, 10 for Qwen 2.1, or 16 for MiniMax H3**, with dynamically added numbered sockets. If too many images remain linked, switching to a lower-cap family is **refused with a warning**: **the user manually disconnects unwanted inputs; no link is deleted automatically**. English/Korean `imageN` references are renumbered for the chosen edit target and, for H3, converted to `<Picture N>`. Qwen 2.1 Turbo's **8-step built-in sigma** behavior remains unchanged. Optional **PiD x2/x4 and color matching are available only for Qwen 2511**. Connect outputs to `Save Image`.
 
@@ -43,7 +43,7 @@ It accepts up to **3 inputs for Qwen 2511, 10 for Qwen 2.1, or 16 for MiniMax H3
 | 프롬프트 / Prompts | 노드 내부 긍정·부정 프롬프트 / built-in positive and negative prompts |
 | 참조 번호 / References | 한·영 이미지 번호 자동 대응 / Korean & English numbered references |
 | 해상도 / Resolution | Qwen: 약 0.5·1·1.5·2MP; MiniMax H3: 4·8·16MP, 원본, 사용자 지정 / Original and Custom also available |
-| 샘플링 / Sampling | Qwen 2.1 Turbo: 8-step native sigma; MiniMax H3: 6 steps, CFG 1, euler/simple, Zero ON |
+| 샘플링 / Sampling | Qwen 2.1 Turbo: 8-step native sigma; MiniMax H3: **Euler/simple/6 기본 권장**, Steps·Sampler·Scheduler 실험적 조정 가능; CFG 1, RAM reuse OFF |
 | LoRA | 다중 LoRA·강도·순서·개별 ON/OFF / multiple LoRAs, strengths, ordering |
 | PiD | Qwen 2511 전용 x2/x4 결과 및 선택적 색감 보정; 2.1/H3는 OFF 잠금 |
 | 언어 / Language | ComfyUI `Comfy.Locale` 기반 한글·영문 UI / KO-EN UI labels and tooltips |
@@ -95,7 +95,7 @@ GitHub Releases의 ZIP을 다운로드해 압축을 풀고 `ComfyUI/custom_nodes
 | Qwen Image Edit 2511 | 20 Steps, CFG 4 | KSampler |
 | Qwen Image 2.1 Base | 25 Steps, CFG 1 | KSampler |
 | Qwen Image 2.1 Turbo | 8 Steps, CFG 1 | **Steps=8:** built-in sigma schedule; **other steps:** KSampler |
-| MiniMax H3 Image | 6 Steps, CFG 1 | euler/simple, Zero ON, PiD OFF; each IMAGE input is a single image |
+| MiniMax H3 Image | 6 Steps, CFG 1 권장 | Euler/simple/6은 체크포인트 PDD 경로, 다른 Steps·Sampler·Scheduler는 실험적; CFG 1, PiD OFF, RAM reuse OFF; IMAGE 입력은 1장 |
 
 Turbo의 8스텝 경로에서는 선택한 `Sampler`와 `CFG`가 반영되지만 `Scheduler` 값은 사용되지 않습니다. Turbo에서도 Steps와 CFG를 자유롭게 변경할 수 있습니다. / In Turbo's 8-step mode, CFG and Sampler are active but Scheduler is ignored; other step counts use the chosen KSampler scheduler.
 
@@ -110,9 +110,11 @@ Turbo의 8스텝 경로에서는 선택한 `Sampler`와 `CFG`가 반영되지만
 
 **16MP 네이티브 지원 / Native ~16MP:** 공식 4096×4096, 4736×3552, 5024×3360, 5472×3072, 6272×2688 등의 해상도는 PiD 없이 모델이 직접 생성합니다. H3의 가로·세로는 ComfyUI 코어 범위인 최대 16384px로 별도 처리하며, 다른 Qwen 계열은 종전 8192px 제한을 유지합니다. 극단적인 가로세로 비율에서 코어 한도를 넘는 경우에는 실제 리사이즈 전에 경고합니다. H3 `custom`에서 가로·세로가 모두 0이면 약 4MP로 계산합니다. / MiniMax H3 generates native ~16MP (including ComfyUI's listed aspect ratios) without PiD. Only the H3 path uses the native 16384px per-axis bound; legacy Qwen keeps 8192px. Extreme aspect ratios are validated before image allocation. Both Custom dimensions at zero default to ~4MP for H3.
 
+**H3 사전 검사 / H3 preflight:** 확산 모델·텍스트 인코더·VAE의 설치 여부와 H3 계열 호환성을 4–16MP 참조 이미지 리사이즈보다 먼저 검사합니다. 선택 오류로 불필요한 대용량 이미지 할당이 발생하지 않습니다. / Selected H3 asset names and family compatibility are checked before a potentially large reference-image resize.
+
 **모델 자동 추천 / Model suggestions:** MiniMax H3를 처음 선택하는 경우 설치된 `int8_convrot` 확산 모델 및 텍스트 인코더를 우선 추천합니다. 이미 저장한 모델별 설정과 사용자가 직접 선택한 파일은 변경하지 않습니다. 이미지 연결 한도를 초과하면 정확한 초과 단자와 개수(수정 대상 포함 여부)를 알리고 모델 전환을 막습니다. 링크 해제는 항상 사용자가 직접 합니다. / First use prefers installed `int8_convrot` assets. Saved model choices are preserved. An over-limit switch warns about all offending connected sockets; the user must manually disconnect them.
 
-**참조와 샘플링 / References & sampling:** `image1`부터 최대 16장까지 순서대로 연결합니다. 수정 대상은 내부에서 `<Picture 1>`이 되고 나머지가 순서대로 재배열됩니다. Steps=6, CFG=1, euler/simple, Zero Conditioning ON은 고정이며, Negative·PiD·자산 재사용은 OFF입니다. 여러 장의 IMAGE 참조를 허용하더라도 각 IMAGE 입력의 배치 크기는 1이어야 합니다. / Up to 16 consecutive sockets; the edit target becomes `<Picture 1>`. Steps=6/CFG=1/euler/simple/Zero ON are fixed; Negative/PiD/RAM asset reuse are disabled. Each IMAGE socket accepts one image, not a batch.
+**참조와 샘플링 / References & sampling:** `image1`부터 최대 16장까지 순서대로 연결합니다. 수정 대상은 내부에서 `<Picture 1>`이 되고 나머지가 순서대로 재배열됩니다. **6 Steps / Euler / Simple은 H3 체크포인트 `pdd_sigmas`의 공식 권장 경로**입니다. Steps·Sampler·Scheduler는 변경 가능하며 다른 스텝 수에서는 H3 모델 샘플러가 PDD 격자를 보간합니다(실험적). H3에서만 CFG 1·PiD OFF·RAM 재사용 OFF를 적용하며 사용자 Negative Prompt/Zero Conditioning 설정과 빈 이미지 보조는 적용하지 않습니다. 단, CFG 1에서도 무조건 예측을 요구하는 CFG++ 샘플러를 위해 내부적으로 `ConditioningZeroOut(positive)`를 제공합니다. 다른 모델의 샘플링 경로와 설정 기억은 유지합니다. 실제 참조 IMAGE의 비전 토큰 및 latent를 사용하며 각 IMAGE 입력은 배치 1입니다. / Connect up to 16 references; the edit target becomes `<Picture 1>`. **Euler/simple/6** follows checkpoint `pdd_sigmas`. Alternate user-selected sampling is experimental and native H3 sampling interpolates the PDD grid for other step counts. Only H3 locks CFG 1, PiD OFF and asset reuse OFF. User negative text/Zero Conditioning settings are ignored for H3, but an internal zeroed-positive conditioning is supplied for CFG++ samplers. No synthetic blank picture tokens are used. Other model families are unchanged.
 
 **모델 전환 / Switching models:** 예를 들어 MiniMax에서 `image16`까지 연결하고 2511로 바꾸면 경고가 나타나고 **변경을 취소합니다**. 연결선은 한 개도 자동 삭제하지 않습니다. 사용자가 직접 상한을 넘는 연결을 해제한 뒤 재선택하세요. / Changing from H3 with higher image links to Qwen 2511/2.1 is blocked until **you manually disconnect** the extra links. Nothing is removed automatically.
 
@@ -122,7 +124,7 @@ Turbo의 8스텝 경로에서는 선택한 `Sampler`와 `CFG`가 반영되지만
 
 Per-model sampling, asset and LoRA settings are committed after **successful queue submission**, not after GPU completion. Unsaved drafts survive model switches only in the current editor session. Prompt texts, edit target, resolution and seed stay with the active task. Save the ComfyUI workflow separately for persistence.
 
-## 실제 프롬프트 기록 / Executed prompt record (v1.0.4)
+## 실제 프롬프트 기록 / Executed prompt record
 
 번역기·LLM 노드 등을 거쳐 들어온 프롬프트도, 노드가 실제로 모델에 넣은 최종 긍정/부정 문장을 이미지 메타데이터(`ultra_generation_prompts`)에 기록합니다. Ultra Exif Reader v4.12 이상에서 Final CLIP 프롬프트로 표시됩니다.
 
