@@ -12,7 +12,11 @@ const LEGACY_RESOLUTIONS = ["auto_1mp", "0.5MP", "1.5MP", "2MP", "original", "cu
 const MINIMAX_RESOLUTIONS = ["4MP", "8MP", "16MP", "original", "custom"];
 const ALL_RESOLUTIONS = [...new Set([...LEGACY_RESOLUTIONS, ...MINIMAX_RESOLUTIONS])];
 const MINIMAX_FAMILY = "MiniMax H3 Image";
-const FAMILY_HEIGHT_PROPERTY = "ultraEditorFamilyNodeHeightsV1";
+// Per-family prompt space: node height above the core's computeSize() minimum.
+// Remembering this (not the total height) keeps the writing area stable when
+// image sockets, LoRA rows, PiD or custom-resolution rows differ on return.
+const FAMILY_SPACE_PROPERTY = "ultraEditorFamilyPromptSpaceV1";
+const FAMILY_HEIGHT_PROPERTY = "ultraEditorFamilyNodeHeightsV1";   // legacy totals (v1.0.8)
 const LEGACY_FAMILY_GEOMETRY_PROPERTY = "ultraEditorFamilyNodeSizesV1";
 const MINIMAX_LOCKED_WIDGETS = [
   "negative_text", "cfg",
@@ -358,6 +362,36 @@ function editorHeightStore(node) {
   return heights;
 }
 
+function validEditorSpace(value) {
+  const space = Number(value);
+  return Number.isFinite(space) && space >= 0 && space <= 16384 ? space : null;
+}
+
+function editorSpaceStore(node) {
+  node.properties ||= {};
+  const value = node.properties[FAMILY_SPACE_PROPERTY];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    node.properties[FAMILY_SPACE_PROPERTY] = {};
+  }
+  return node.properties[FAMILY_SPACE_PROPERTY];
+}
+
+function rememberEditorSpace(node, family, size, minHeight) {
+  if (!Object.hasOwn(CAP, family)) return;
+  editorSpaceStore(node)[family] = Math.max(0, Math.round(size[1] - minHeight));
+  // The family now has a space value; its legacy total height is obsolete.
+  const heights = editorHeightStore(node);
+  delete heights[family];
+  if (!Object.keys(heights).length) delete node.properties[FAMILY_HEIGHT_PROPERTY];
+}
+
+function legacyEditorHeight(node, family) {
+  const heights = editorHeightStore(node);
+  const height = validEditorHeight(heights[family]);
+  if (!Object.keys(heights).length) delete node.properties[FAMILY_HEIGHT_PROPERTY];
+  return height;
+}
+
 function editorContentHeight(node) {
   try {
     const height = Number(node.computeSize?.()?.[1]);
@@ -367,22 +401,39 @@ function editorContentHeight(node) {
 
 function beginEditorGeometry(node, family, remember = false) {
   if (!node || node.__ultraEditorLoading || app.configuringGraph || node.flags?.collapsed) return null;
+  // A previous change has not been laid out yet: node.size still belongs to
+  // the earlier state, so neither remember it nor start a second transition.
+  const pending = node.__ultraEditorPendingGeometry;
+  if (pending) {
+    if (remember) pending.restoreSaved = true;
+    return remember ? pending : null;
+  }
   const size = validEditorSize(node.size);
   if (!size) return null;
-  if (remember && Object.hasOwn(CAP, family)) editorHeightStore(node)[family] = size[1];
-  return { size, beforeMinHeight: editorContentHeight(node) ?? size[1], family, restoreSaved: remember };
+  const beforeMinHeight = editorContentHeight(node) ?? size[1];
+  if (remember) rememberEditorSpace(node, family, size, beforeMinHeight);
+  return { size, beforeMinHeight, family, restoreSaved: remember };
 }
 
 function settleEditorGeometry(node) {
   const transition = node.__ultraEditorPendingGeometry;
-  if (!transition || transition.family !== model(node) || node.flags?.collapsed) return;
+  if (!transition) return;
+  // Consume the transition in every case so a stale one (collapsed node,
+  // family no longer current) can never be reused by a later change.
   node.__ultraEditorPendingGeometry = null;
+  if (transition.family !== model(node) || node.flags?.collapsed) return;
   if (typeof node.setSize !== "function") return;
   const nativeSize = node.computeSize?.();
   const minWidth = Number(nativeSize?.[0]);
   const minHeight = Number(nativeSize?.[1]);
   if (!Number.isFinite(minHeight) || minHeight <= 0) return;
-  const storedHeight = transition.restoreSaved ? validEditorHeight(editorHeightStore(node)[transition.family]) : null;
+  // Same-family value change that added or removed no rows (e.g. 4MP -> 8MP):
+  // the layout is unchanged, so the user's node height must not move.
+  if (!transition.restoreSaved && minHeight === transition.beforeMinHeight) return;
+  const storedSpace = transition.restoreSaved ? validEditorSpace(editorSpaceStore(node)[transition.family]) : null;
+  const legacyHeight = transition.restoreSaved && storedSpace === null
+    ? legacyEditorHeight(node, transition.family) : null;
+  const storedHeight = storedSpace !== null ? minHeight + storedSpace : legacyHeight;
   // The first visit to a family keeps the previous text editor's free height
   // after subtracting only rows that disappeared. Never call a full min-fit.
   const freeHeight = Math.max(0, transition.size[1] - transition.beforeMinHeight);
@@ -853,6 +904,15 @@ function fitLabel(ctx, text, maxWidth) {
   while (out.length > 3 && ctx.measureText(`${out}…`).width > maxWidth) out = out.slice(0, -1);
   return `${out}…`;
 }
+// Canvas mode: the core may hand a custom widget a stale per-widget width
+// (e.g. the width at creation) until the node is resized or the workflow is
+// re-entered, so the row is drawn narrower than the node. Use the node's own
+// width there. Vue Nodes draws legacy widgets on their own canvas: keep its width.
+function liveRowWidth(node, width) {
+  if (globalThis.LiteGraph?.vueNodesMode) return width;
+  const nodeWidth = Number(node?.size?.[0]);
+  return Number.isFinite(nodeWidth) && nodeWidth > 0 ? nodeWidth : width;
+}
 class EditorLoraRow {
   constructor(name, value = {}) {
     this.name = name; this.type = "custom"; this.options = {}; this._editorLoraRow = true;
@@ -861,6 +921,7 @@ class EditorLoraRow {
   }
   computeSize(width) { return [width, ROW_HEIGHT]; }
   draw(ctx, node, width, y, height) {
+    width = liveRowWidth(node, width);
     this.last_y = y;
     // Core assigns widget.width via a read-only compatibility property;
     // draw() provides the actual usable row width for pointer hit-testing.
@@ -900,6 +961,7 @@ class EditorLoraAdd {
   }
   computeSize(width) { return [width, ROW_HEIGHT]; }
   draw(ctx, node, width, y, height) {
+    width = liveRowWidth(node, width);
     ctx.save(); roundRect(ctx, 15, y + 2, width - 30, Math.max(20, height - 4));
     ctx.fillStyle = globalThis.LiteGraph?.WIDGET_BGCOLOR || "#222";
     ctx.strokeStyle = globalThis.LiteGraph?.WIDGET_OUTLINE_COLOR || "#666"; ctx.fill(); ctx.stroke();
@@ -1145,10 +1207,8 @@ function attachHooks(node) {
       const geometry = beginEditorGeometry(node, model(node));
       const ret = callback?.call(this, value, ...args);
       syncNativeWidgets(node);
-      if (geometry) {
-        node.__ultraEditorPendingGeometry = geometry;
-        schedule(node);
-      }
+      if (geometry) node.__ultraEditorPendingGeometry = geometry;
+      if (node.__ultraEditorPendingGeometry) schedule(node);
       return ret;
     };
   }
@@ -1157,6 +1217,9 @@ function attachHooks(node) {
     const callback = diffusion.callback;
     diffusion.callback = function(value, ...args) {
       const currentFamily = model(node);
+      // A saved model profile can switch PiD/resolution rows: treat it like
+      // the same-family PiD/resolution change so the prompt space is kept.
+      const geometry = beginEditorGeometry(node, currentFamily);
       const selectedModel = String(value || widget(node, "diffusion_model")?.value || "");
       const previousModel = node.__ultraEditorCurrentDiffusion || "";
       if (selectedModel !== previousModel) captureCurrentDraft(node);
@@ -1169,6 +1232,8 @@ function attachHooks(node) {
       }
       trackActiveProfile(node);
       syncNativeWidgets(node);
+      if (geometry) node.__ultraEditorPendingGeometry = geometry;
+      if (node.__ultraEditorPendingGeometry) schedule(node);
       return result;
     };
   }
@@ -1200,10 +1265,8 @@ function attachHooks(node) {
       const geometry = beginEditorGeometry(node, model(node));
       const ret = callback?.call(this, value, ...args);
       syncNativeWidgets(node);
-      if (geometry) {
-        node.__ultraEditorPendingGeometry = geometry;
-        schedule(node);
-      }
+      if (geometry) node.__ultraEditorPendingGeometry = geometry;
+      if (node.__ultraEditorPendingGeometry) schedule(node);
       return ret;
     };
   }

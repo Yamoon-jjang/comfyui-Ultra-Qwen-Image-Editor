@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-ultra-qwen-image-editor"
-version = "1.0.8"
+version = "1.0.9"
 description = "Qwen 2511/2.1 and MiniMax H3 Image multi-reference editor for ComfyUI, with optional Qwen PiD upscale"
 readme = "README.md"
 requires-python = ">=3.10"
