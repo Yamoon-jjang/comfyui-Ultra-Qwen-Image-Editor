@@ -12,6 +12,8 @@ const LEGACY_RESOLUTIONS = ["auto_1mp", "0.5MP", "1.5MP", "2MP", "original", "cu
 const MINIMAX_RESOLUTIONS = ["4MP", "8MP", "16MP", "original", "custom"];
 const ALL_RESOLUTIONS = [...new Set([...LEGACY_RESOLUTIONS, ...MINIMAX_RESOLUTIONS])];
 const MINIMAX_FAMILY = "MiniMax H3 Image";
+const FAMILY_HEIGHT_PROPERTY = "ultraEditorFamilyNodeHeightsV1";
+const LEGACY_FAMILY_GEOMETRY_PROPERTY = "ultraEditorFamilyNodeSizesV1";
 const MINIMAX_LOCKED_WIDGETS = [
   "negative_text", "cfg",
   "zero_conditioning", "pid_upscale", "reuse_assets",
@@ -320,6 +322,89 @@ function syncNativeWidgets(node) {
   }
   localizeNode(node);
 }
+
+// A model family has its own user-sized prompt height. Only node.size controls
+// the native ComfyUI multiline layout; fitting to computeSize() alone would
+// collapse the extra writing space to the widgets' one-line minimum.
+function validEditorSize(value) {
+  const width = Number(value?.[0]);
+  const height = Number(value?.[1]);
+  return Number.isFinite(width) && width >= 300 && width <= 16384 &&
+    Number.isFinite(height) && height >= 40 && height <= 16384
+    ? [width, height] : null;
+}
+
+function validEditorHeight(value) {
+  const height = Number(value);
+  return Number.isFinite(height) && height >= 40 && height <= 16384 ? height : null;
+}
+
+function editorHeightStore(node) {
+  node.properties ||= {};
+  const value = node.properties[FAMILY_HEIGHT_PROPERTY];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    node.properties[FAMILY_HEIGHT_PROPERTY] = {};
+  }
+  const heights = node.properties[FAMILY_HEIGHT_PROPERTY];
+  const legacy = node.properties[LEGACY_FAMILY_GEOMETRY_PROPERTY];
+  if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+    for (const family of Object.keys(CAP)) {
+      if (validEditorHeight(heights[family]) !== null) continue;
+      const oldSize = validEditorSize(legacy[family]);
+      if (oldSize) heights[family] = oldSize[1];
+    }
+  }
+  delete node.properties[LEGACY_FAMILY_GEOMETRY_PROPERTY];
+  return heights;
+}
+
+function editorContentHeight(node) {
+  try {
+    const height = Number(node.computeSize?.()?.[1]);
+    return Number.isFinite(height) && height > 0 ? height : null;
+  } catch (_) { return null; }
+}
+
+function beginEditorGeometry(node, family, remember = false) {
+  if (!node || node.__ultraEditorLoading || app.configuringGraph || node.flags?.collapsed) return null;
+  const size = validEditorSize(node.size);
+  if (!size) return null;
+  if (remember && Object.hasOwn(CAP, family)) editorHeightStore(node)[family] = size[1];
+  return { size, beforeMinHeight: editorContentHeight(node) ?? size[1], family, restoreSaved: remember };
+}
+
+function settleEditorGeometry(node) {
+  const transition = node.__ultraEditorPendingGeometry;
+  if (!transition || transition.family !== model(node) || node.flags?.collapsed) return;
+  node.__ultraEditorPendingGeometry = null;
+  if (typeof node.setSize !== "function") return;
+  const nativeSize = node.computeSize?.();
+  const minWidth = Number(nativeSize?.[0]);
+  const minHeight = Number(nativeSize?.[1]);
+  if (!Number.isFinite(minHeight) || minHeight <= 0) return;
+  const storedHeight = transition.restoreSaved ? validEditorHeight(editorHeightStore(node)[transition.family]) : null;
+  // The first visit to a family keeps the previous text editor's free height
+  // after subtracting only rows that disappeared. Never call a full min-fit.
+  const freeHeight = Math.max(0, transition.size[1] - transition.beforeMinHeight);
+  const safeFirstUseExtra = globalThis.LiteGraph?.vueNodesMode ? 160 : 120;
+  const paddedHeight = Math.max(minHeight + freeHeight, minHeight + safeFirstUseExtra);
+  const wantedHeight = storedHeight ?? (transition.restoreSaved
+    ? paddedHeight
+    : minHeight < transition.beforeMinHeight
+      // Same-family PiD/resolution collapse: release fixed rows only as far
+      // as the writing area stays comfortably multi-line, never to one line.
+      ? Math.min(transition.size[1], paddedHeight)
+      : Math.max(transition.size[1], paddedHeight));
+  const currentWidth = Number(node.size?.[0]);
+  const width = Math.max(300, Number.isFinite(minWidth) ? minWidth : 0,
+    Number.isFinite(currentWidth) ? currentWidth : transition.size[0]);
+  const height = Math.max(minHeight, wantedHeight);
+  if (!Number.isFinite(height) || height > 16384 || width > 16384) return;
+  if (node.size?.[0] !== width || node.size?.[1] !== height) {
+    node.setSize([width, height]);
+    node.setDirtyCanvas?.(true, true);
+  }
+}
 // Initial prompt height: the core's setInitialSize() (node constructor) reads
 // node._initialMinSize once and calls setSize() itself. Supplying extra height
 // here only affects a newly created node; the core then gives that free space
@@ -391,6 +476,7 @@ function syncImageSlots(node) {
   }
   node.__ultraEditorPendingTarget = false;
   syncNativeWidgets(node);
+  settleEditorGeometry(node);
   // No geometry calls here: ComfyUI/LiteGraph lays out native sockets and
   // widgets. Only invalidate the drawing after actual widget changes.
   node.setDirtyCanvas?.(true, true);
@@ -1030,6 +1116,8 @@ function attachHooks(node) {
         return;
       }
       if (next !== oldFamily) {
+        node.__ultraEditorPendingGeometry = beginEditorGeometry(node, oldFamily, true);
+        if (node.__ultraEditorPendingGeometry) node.__ultraEditorPendingGeometry.family = next;
         captureCurrentDraft(node);
         node.__ultraEditorDraftLastModelByFamily ||= Object.create(null);
         node.__ultraEditorDraftLastModelByFamily[oldFamily] = node.__ultraEditorCurrentDiffusion;
@@ -1054,8 +1142,13 @@ function attachHooks(node) {
   if (resolution) {
     const callback = resolution.callback;
     resolution.callback = function(value, ...args) {
+      const geometry = beginEditorGeometry(node, model(node));
       const ret = callback?.call(this, value, ...args);
       syncNativeWidgets(node);
+      if (geometry) {
+        node.__ultraEditorPendingGeometry = geometry;
+        schedule(node);
+      }
       return ret;
     };
   }
@@ -1104,8 +1197,13 @@ function attachHooks(node) {
   if (pid) {
     const callback = pid.callback;
     pid.callback = function(value, ...args) {
+      const geometry = beginEditorGeometry(node, model(node));
       const ret = callback?.call(this, value, ...args);
       syncNativeWidgets(node);
+      if (geometry) {
+        node.__ultraEditorPendingGeometry = geometry;
+        schedule(node);
+      }
       return ret;
     };
   }
@@ -1187,6 +1285,7 @@ app.registerExtension({
     const prevConnections = nodeType.prototype.onConnectionsChange;
     nodeType.prototype.configure = function ultraEditorConfigure(info) {
       this.__ultraEditorLoading = true;
+      this.__ultraEditorPendingGeometry = null;
       this.serialize_widgets = true;
       this.__ultraEditorSyncSeq = (this.__ultraEditorSyncSeq || 0) + 1;
       const saved = Array.isArray(info?.widgets_values) ? info.widgets_values : [];

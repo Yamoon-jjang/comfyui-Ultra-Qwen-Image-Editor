@@ -1,4 +1,4 @@
-# Ultra Qwen Image Editor + PiD — v1.0.7
+# Ultra Qwen Image Editor + PiD — v1.0.8
 
 **Qwen 2511·2.1 + MiniMax H3 Image 통합 편집 / Multi-family native ComfyUI image editor**
 
@@ -41,6 +41,7 @@ It accepts up to **3 inputs for Qwen 2511, 10 for Qwen 2.1, or 16 for MiniMax H3
 | 입력 이미지 / Inputs | 2511: 최대 3장 / 3; 2.1: 최대 10장 / 10; MiniMax H3: 최대 16장 / 16 |
 | 수정 대상 / Edit Target | `image1` 또는 연결된 다른 입력 선택 / select a connected image |
 | 프롬프트 / Prompts | 노드 내부 긍정·부정 프롬프트 / built-in positive and negative prompts |
+| 노드 크기 / Node sizing | 모델별 사용자 높이 복원, 현재 너비 유지, 여러 줄 프롬프트 입력 공간 보호 / per-family height, stable current width, multiline prompt space |
 | 참조 번호 / References | 한·영 이미지 번호 자동 대응 / Korean & English numbered references |
 | 해상도 / Resolution | Qwen: 약 0.5·1·1.5·2MP; MiniMax H3: 4·8·16MP, 원본, 사용자 지정 / Original and Custom also available |
 | 샘플링 / Sampling | Qwen 2.1 Turbo: 8-step native sigma; MiniMax H3: **Euler/simple/6 기본 권장**, Steps·Sampler·Scheduler 실험적 조정 가능; CFG 1, RAM reuse OFF |
